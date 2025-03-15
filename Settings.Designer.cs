@@ -16,6 +16,7 @@
         private void InitializeComponent()
         {
             this.components = new System.ComponentModel.Container();
+            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Settings));
             this.tabControl1 = new System.Windows.Forms.TabControl();
             this.ImageFolders = new System.Windows.Forms.TabPage();
             this.cbx_AllScreens = new System.Windows.Forms.CheckBox();
@@ -46,6 +47,10 @@
             this.lblEffectDuration = new System.Windows.Forms.Label();
             this.numericUpDown2 = new System.Windows.Forms.NumericUpDown();
             this.About = new System.Windows.Forms.TabPage();
+            this.label6 = new System.Windows.Forms.Label();
+            this.richTextBox2 = new System.Windows.Forms.RichTextBox();
+            this.label5 = new System.Windows.Forms.Label();
+            this.richTextBox1 = new System.Windows.Forms.RichTextBox();
             this.btnCancel = new System.Windows.Forms.Button();
             this.btnSave = new System.Windows.Forms.Button();
             this.folderBrowserDialog1 = new System.Windows.Forms.FolderBrowserDialog();
@@ -64,6 +69,7 @@
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown3)).BeginInit();
             this.groupBox2.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown2)).BeginInit();
+            this.About.SuspendLayout();
             this.toolStrip1.SuspendLayout();
             this.SuspendLayout();
             // 
@@ -108,9 +114,9 @@
             this.cbx_AllScreens.AutoSize = true;
             this.cbx_AllScreens.Location = new System.Drawing.Point(6, 15);
             this.cbx_AllScreens.Name = "cbx_AllScreens";
-            this.cbx_AllScreens.Size = new System.Drawing.Size(143, 17);
+            this.cbx_AllScreens.Size = new System.Drawing.Size(101, 17);
             this.cbx_AllScreens.TabIndex = 0;
-            this.cbx_AllScreens.Tag = RegistryConstants.REG_KEY_USE_MULTIPLE_SCREENS;
+            this.cbx_AllScreens.Tag = "UseMultipleScreens";
             this.cbx_AllScreens.Text = "Use All Screens";
             this.cbx_AllScreens.UseVisualStyleBackColor = true;
             // 
@@ -131,7 +137,7 @@
             this.cbx_showFileNames.Name = "cbx_showFileNames";
             this.cbx_showFileNames.Size = new System.Drawing.Size(108, 17);
             this.cbx_showFileNames.TabIndex = 0;
-            this.cbx_showFileNames.Tag = RegistryConstants.REG_KEY_SHOW_FILENAME;
+            this.cbx_showFileNames.Tag = "ShowFileName";
             this.cbx_showFileNames.Text = "Show File Names";
             this.cbx_showFileNames.UseVisualStyleBackColor = true;
             this.cbx_showFileNames.CheckedChanged += new System.EventHandler(this.cbx_showFileNames_CheckedChanged);
@@ -177,7 +183,7 @@
             this.fileTypesList.Name = "fileTypesList";
             this.fileTypesList.Size = new System.Drawing.Size(262, 79);
             this.fileTypesList.TabIndex = 5;
-            this.fileTypesList.Tag = RegistryConstants.REG_KEY_FILE_TYPES;
+            this.fileTypesList.Tag = "FileTypes";
             this.fileTypesList.UseCompatibleStateImageBehavior = false;
             this.fileTypesList.View = System.Windows.Forms.View.List;
             // 
@@ -201,7 +207,7 @@
             this.numericUpDown1.Name = "numericUpDown1";
             this.numericUpDown1.Size = new System.Drawing.Size(42, 20);
             this.numericUpDown1.TabIndex = 4;
-            this.numericUpDown1.Tag = RegistryConstants.REG_KEY_DELAY_BETWEEN_IMAGES;
+            this.numericUpDown1.Tag = "delayBetweenImages";
             this.numericUpDown1.Value = new decimal(new int[] {
             10,
             0,
@@ -215,7 +221,7 @@
             this.comboBox1.Name = "comboBox1";
             this.comboBox1.Size = new System.Drawing.Size(42, 21);
             this.comboBox1.TabIndex = 4;
-            this.comboBox1.Tag = RegistryConstants.REG_KEY_FRAMES_ON_SCREEN;
+            this.comboBox1.Tag = "FramesOnScreen";
             this.comboBox1.Visible = false;
             // 
             // chkRandomOrder
@@ -225,9 +231,9 @@
             this.chkRandomOrder.CheckState = System.Windows.Forms.CheckState.Checked;
             this.chkRandomOrder.Location = new System.Drawing.Point(6, 37);
             this.chkRandomOrder.Name = "chkRandomOrder";
-            this.chkRandomOrder.Size = new System.Drawing.Size(94, 17);
+            this.chkRandomOrder.Size = new System.Drawing.Size(95, 17);
             this.chkRandomOrder.TabIndex = 0;
-            this.chkRandomOrder.Tag = RegistryConstants.REG_KEY_IMAGE_ORDER;
+            this.chkRandomOrder.Tag = "imageOrder";
             this.chkRandomOrder.Text = "Random Order";
             this.chkRandomOrder.UseVisualStyleBackColor = true;
             // 
@@ -353,7 +359,7 @@
             this.numericUpDown3.Name = "numericUpDown3";
             this.numericUpDown3.Size = new System.Drawing.Size(41, 20);
             this.numericUpDown3.TabIndex = 5;
-            this.numericUpDown3.Tag = RegistryConstants.REG_KEY_EFFECT_FRAMES;
+            this.numericUpDown3.Tag = "EffectFrames";
             this.numericUpDown3.Value = new decimal(new int[] {
             5,
             0,
@@ -381,7 +387,7 @@
             this.lstvEffects.Name = "lstvEffects";
             this.lstvEffects.Size = new System.Drawing.Size(520, 225);
             this.lstvEffects.TabIndex = 8;
-            this.lstvEffects.Tag = RegistryConstants.REG_KEY_EFFECTS;
+            this.lstvEffects.Tag = "Effects";
             this.lstvEffects.UseCompatibleStateImageBehavior = false;
             this.lstvEffects.View = System.Windows.Forms.View.List;
             // 
@@ -392,7 +398,7 @@
             this.chkUseTransitions.Name = "chkUseTransitions";
             this.chkUseTransitions.Size = new System.Drawing.Size(130, 17);
             this.chkUseTransitions.TabIndex = 3;
-            this.chkUseTransitions.Tag = RegistryConstants.REG_KEY_USE_EFFECTS;
+            this.chkUseTransitions.Tag = "Use Effects";
             this.chkUseTransitions.Text = "Use Transition Effects";
             this.chkUseTransitions.UseVisualStyleBackColor = true;
             // 
@@ -422,16 +428,58 @@
             this.numericUpDown2.Name = "numericUpDown2";
             this.numericUpDown2.Size = new System.Drawing.Size(49, 20);
             this.numericUpDown2.TabIndex = 1;
-            this.numericUpDown2.Tag = RegistryConstants.REG_KEY_EFFECT_DURATION;
+            this.numericUpDown2.Tag = "EffectDuration";
             // 
             // About
             // 
+            this.About.Controls.Add(this.label6);
+            this.About.Controls.Add(this.richTextBox2);
+            this.About.Controls.Add(this.label5);
+            this.About.Controls.Add(this.richTextBox1);
             this.About.Location = new System.Drawing.Point(4, 22);
             this.About.Name = "About";
             this.About.Size = new System.Drawing.Size(569, 364);
             this.About.TabIndex = 2;
             this.About.Text = "About";
             this.About.UseVisualStyleBackColor = true;
+            // 
+            // label6
+            // 
+            this.label6.AutoSize = true;
+            this.label6.Font = new System.Drawing.Font("Microsoft Sans Serif", 12F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.label6.Location = new System.Drawing.Point(3, 198);
+            this.label6.Name = "label6";
+            this.label6.Size = new System.Drawing.Size(193, 20);
+            this.label6.TabIndex = 3;
+            this.label6.Text = "About the Screensaver";
+            // 
+            // richTextBox2
+            // 
+            this.richTextBox2.Location = new System.Drawing.Point(3, 221);
+            this.richTextBox2.Name = "richTextBox2";
+            this.richTextBox2.ReadOnly = true;
+            this.richTextBox2.Size = new System.Drawing.Size(558, 88);
+            this.richTextBox2.TabIndex = 2;
+            this.richTextBox2.Text = resources.GetString("richTextBox2.Text");
+            // 
+            // label5
+            // 
+            this.label5.AutoSize = true;
+            this.label5.Font = new System.Drawing.Font("Microsoft Sans Serif", 12F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
+            this.label5.Location = new System.Drawing.Point(3, 10);
+            this.label5.Name = "label5";
+            this.label5.Size = new System.Drawing.Size(193, 20);
+            this.label5.TabIndex = 1;
+            this.label5.Text = "About the Screensaver";
+            // 
+            // richTextBox1
+            // 
+            this.richTextBox1.Location = new System.Drawing.Point(3, 33);
+            this.richTextBox1.Name = "richTextBox1";
+            this.richTextBox1.ReadOnly = true;
+            this.richTextBox1.Size = new System.Drawing.Size(558, 154);
+            this.richTextBox1.TabIndex = 0;
+            this.richTextBox1.Text = resources.GetString("richTextBox1.Text");
             // 
             // btnCancel
             // 
@@ -519,6 +567,8 @@
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown3)).EndInit();
             this.groupBox2.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)(this.numericUpDown2)).EndInit();
+            this.About.ResumeLayout(false);
+            this.About.PerformLayout();
             this.toolStrip1.ResumeLayout(false);
             this.toolStrip1.PerformLayout();
             this.ResumeLayout(false);
@@ -567,5 +617,9 @@
         private System.Windows.Forms.Label labelFileNameDisplay;
         private System.Windows.Forms.CheckBox cbx_debug;
         private System.Windows.Forms.ToolTip toolTip1;
+        private System.Windows.Forms.Label label6;
+        private System.Windows.Forms.RichTextBox richTextBox2;
+        private System.Windows.Forms.Label label5;
+        private System.Windows.Forms.RichTextBox richTextBox1;
     }
 }

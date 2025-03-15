@@ -123,12 +123,23 @@
   <metadata name="Subfolders.UserAddedColumn" type="System.Boolean, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
     <value>True</value>
   </metadata>
-  <metadata name="FolderName.UserAddedColumn" type="System.Boolean, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
-    <value>True</value>
-  </metadata>
-  <metadata name="Subfolders.UserAddedColumn" type="System.Boolean, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
-    <value>True</value>
-  </metadata>
+  <data name="richTextBox2.Text" xml:space="preserve">
+    <value> - Left Arrow / Backspace – Show the previous image.
+ - Right Arrow / Page Down – Show the next image.
+ - Escape (ESC) – Exit the screensaver.
+ - Mouse Movement or Click – Select screen (when applicable).</value>
+  </data>
+  <data name="richTextBox1.Text" xml:space="preserve">
+    <value>This screensaver provides an immersive visual experience by displaying images and videos across multiple screens.
+It supports a variety of image formats (e.g., JPG, PNG, BMP, GIF) and video content, ensuring a dynamic display with smooth transitions.
+
+Features:
+ - Multi-Screen Support: Runs seamlessly across all connected displays.
+ - Customizable Effects: Includes transition animations for a visually appealing experience.
+ - Filename Display: Configurable display modes to show full path, relative path, or just the filename.
+ - Adjustable Timing: Set the delay between images and effect durations.
+ - Random Order: Images can be displayed in random sequence.</value>
+  </data>
   <metadata name="folderBrowserDialog1.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
     <value>17, 17</value>
   </metadata>

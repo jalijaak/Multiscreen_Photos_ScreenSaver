@@ -31,7 +31,11 @@ namespace ScreenSaver
         private List<String> images = new List<string>();
         private AnimationControl animationControl; // Single control instead of list
         private int imagesCount = 0;
-        private Stack<string> imageStack;
+
+        private const int MAX_HISTORY_SIZE = 2000;
+        private List<string> imageHistory = new List<string>();
+        private int currentImageIndex = -1;
+
         private int animationSteps = 15;
         private int animationStepInterval;
         private int previous = 0;
@@ -182,7 +186,7 @@ namespace ScreenSaver
         private void LoadImageFiles()
         {
             images.Clear();
-            imageStack = new Stack<string>();
+            imageHistory = new List<string>();
 
             // Get folders from registry
             SortedDictionary<string, bool> imageFolders = registryManager.getImageFolders();
@@ -282,75 +286,83 @@ namespace ScreenSaver
 
         private void timer1_Tick(object sender, EventArgs e)
         {
-            showNextImage();
+            ShowNextImage();
         }
 
-        private void showNextImage()
+        private void ShowNextImage()
         {
-            // Set animation type
-            AnimationTypes selectedEffect = useEffects ? effectsList.PickRandom() : AnimationTypes.None;
-            animationControl.AnimationType = selectedEffect;
-            //WriteDebugLog($"Selected animation effect: {selectedEffect}");
+            string fileName;
 
-            // Select next file
-            String fileName;
-            if (previous < imageStack.Count - 1)
+            // If we're not at the end of the history, move forward in history
+            if (currentImageIndex < imageHistory.Count - 1)
             {
-                String[] imageStackArray = imageStack.ToArray();
-                fileName = imageStackArray[previous++];
+                currentImageIndex++;
+                fileName = imageHistory[currentImageIndex];
             }
             else
             {
+                // Load a new random image and add to history
                 fileName = images.PickRandom();
-                imageStack.Push(fileName);
-                previous = imageStack.Count - 1;
+
+                // Ensure it's different from the currently displayed image
+                while (imageHistory.Count > 0 && fileName == imageHistory.Last() && images.Count > 1)
+                    fileName = images.PickRandom();
+
+                imageHistory.Add(fileName);
+                currentImageIndex = imageHistory.Count - 1;
+
+                // Limit history size
+                if (imageHistory.Count > MAX_HISTORY_SIZE)
+                {
+                    imageHistory.RemoveAt(0);
+                    currentImageIndex--; // Adjust the index accordingly
+                }
             }
 
-            // Check if file exists
+            DisplayImage(fileName);
+
+        }
+
+        private void DisplayImage(string fileName)
+        {
             if (!File.Exists(fileName))
             {
+                WriteDebugLog($"Image file not found: {fileName}, reloading images.");
                 LoadImageFiles();
-                fileName = images.PickRandom();
-                imageStack.Push(fileName);
-                previous = imageStack.Count - 1;
+                return;
             }
 
             try
             {
+                AnimationTypes selectedEffect = useEffects ? effectsList.PickRandom() : AnimationTypes.None;
+                animationControl.AnimationType = selectedEffect;
+
                 Bitmap bmp = new Bitmap(fileName);
                 animationControl.AnimatedImage = bmp;
 
-                // Update filename display based on selected mode
                 string displayName;
                 switch (fileNameDisplayMode)
                 {
-                    case 0: // Full Path
-                        displayName = fileName;
-                        break;
-                    case 1: // Relative Path
-                        string rootPath = Path.GetDirectoryName(Application.ExecutablePath);
-                        displayName = GetRelativePath(rootPath, fileName);
-                        break;
-                    case 2: // File Name Only
-                        displayName = Path.GetFileName(fileName);
-                        break;
-                    default:
-                        displayName = fileName;
-                        break;
+                    case 0: displayName = fileName; break;
+                    case 1: displayName = GetRelativePath(Application.ExecutablePath, fileName); break;
+                    case 2: displayName = Path.GetFileName(fileName); break;
+                    default: displayName = fileName; break;
                 }
-                
-                animationControl.imageName = displayName;
-                //WriteDebugLog($"Displaying image: {fileName} (Shown as: {displayName})");
 
+                animationControl.imageName = displayName;
                 animationControl.Animate(animationStepInterval);
             }
             catch (Exception ex)
             {
-                WriteDebugLog($"Error loading image {fileName}: {ex.Message}");
-                showNextImage();
-                return;
+                WriteDebugLog($"Error displaying image {fileName}: {ex.Message}");
+                images.Remove(fileName);
+                imageHistory.Remove(fileName);
+                if (currentImageIndex >= imageHistory.Count)
+                    currentImageIndex = imageHistory.Count - 1;
+                ShowNextImage();
             }
         }
+
 
         private void Form1_Load(object sender, EventArgs e)
         {
@@ -367,13 +379,13 @@ namespace ScreenSaver
                     //reset timer
                     timer1.Stop();
                     timer1.Start();
-                    showPreviousImage();
+                    ShowPreviousImage();
                     return true;
                 case Keys.Next:
                 case Keys.Right:
                     timer1.Stop();
                     timer1.Start();
-                    showNextImage();
+                    ShowNextImage();
                     return true;
                 case Keys.Escape:
                     if (isPreviewMode)
@@ -387,58 +399,18 @@ namespace ScreenSaver
                     }
                     return true;
                 default:
-                    return true;
+                    return true; //ignore any other key pressed
             }
         }
 
-        private void showPreviousImage()
+        private void ShowPreviousImage()
         {
-            String[] imageStackArray = imageStack.ToArray();
-            if (imageStackArray.Length == 0)
+            if (currentImageIndex > 0)
             {
-                return;
+                currentImageIndex--;
+                string fileName = imageHistory[currentImageIndex];
+                DisplayImage(fileName);
             }
-
-            if (previous >= 0)
-            {
-                // Set animation type
-                if (useEffects)
-                    animationControl.AnimationType = effectsList.PickRandom();
-                else
-                    animationControl.AnimationType = AnimationTypes.None;
-
-                try
-                {
-                    string fileName = imageStackArray[previous];
-                    Bitmap bmp = new Bitmap(fileName);
-                    animationControl.AnimatedImage = bmp;
-
-                    // Update filename display based on selected mode
-                    switch (fileNameDisplayMode)
-                    {
-                        case 0: // Full Path
-                            animationControl.imageName = fileName;
-                            break;
-                        case 1: // Relative Path
-                            string rootPath = Path.GetDirectoryName(Application.ExecutablePath);
-                            animationControl.imageName = GetRelativePath(rootPath, fileName);
-                            break;
-                        case 2: // File Name Only
-                            animationControl.imageName = Path.GetFileName(fileName);
-                            break;
-                    }
-
-                    animationControl.Animate(animationStepInterval);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error loading file {imageStackArray[previous]}: {ex.Message}");
-                    if (previous > 0) previous--;
-                    showPreviousImage();
-                    return;
-                }
-            }
-            if (previous > 0) { previous--; }
         }
 
         private void Form1_Resize(object sender, EventArgs e)
