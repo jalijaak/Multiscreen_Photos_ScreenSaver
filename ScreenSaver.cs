@@ -18,6 +18,8 @@ namespace ScreenSaver
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
+            RegistryManager registryManager = new RegistryManager();
+
             // Check for debug argument in any position
             for (int i = 0; i < args.Length - 1; i++)
             {
@@ -26,19 +28,22 @@ namespace ScreenSaver
                     string debugMode = args[i + 1].ToLower().Trim();
                     if (debugMode == "on")
                     {
-                        RegistryManager registryManager = new RegistryManager();
                         registryManager.setBooleanPropertyVal(RegistryConstants.REG_KEY_DEBUG, true);
                         MessageBox.Show("Debug mode enabled", "Debug Mode", MessageBoxButtons.OK, MessageBoxIcon.Information);
                         return;
                     }
                     else if (debugMode == "off")
                     {
-                        RegistryManager registryManager = new RegistryManager();
                         registryManager.setBooleanPropertyVal(RegistryConstants.REG_KEY_DEBUG, false);
                         MessageBox.Show("Debug mode disabled", "Debug Mode", MessageBoxButtons.OK, MessageBoxIcon.Information);
                         return;
                     }
                 }
+            }
+
+            if (registryManager.getBooleanPropertyVal(RegistryConstants.REG_KEY_DEBUG))
+            {
+                Logger.WriteDebugLog($"Application started with arguments: {string.Join(", ", args)}");
             }
 
             // Process other arguments

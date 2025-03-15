@@ -15,8 +15,6 @@ namespace ScreenSaver
     public partial class Form1 : Form
     {
         // Add debug constants
-        private const string LOG_FILE_NAME = "screensaver_debug.log";
-        private static readonly string LOG_FILE_PATH = Path.Combine(Path.GetTempPath(), LOG_FILE_NAME);
         private bool isDebugMode = false;
 
         private RegistryManager registryManager;
@@ -35,6 +33,9 @@ namespace ScreenSaver
         private const int MAX_HISTORY_SIZE = 2000;
         private List<string> imageHistory = new List<string>();
         private int currentImageIndex = -1;
+
+        private DateTime lastKeyPressTime = DateTime.MinValue;
+        private readonly TimeSpan KEY_PRESS_DELAY = TimeSpan.FromMilliseconds(200);
 
         private int animationSteps = 15;
         private int animationStepInterval;
@@ -63,8 +64,8 @@ namespace ScreenSaver
             try
             {
                 string screenInfo = screen != null ? screen.DeviceName : "NoScreen";
-                string logEntry = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{screenInfo}] {message}";
-                File.AppendAllText(LOG_FILE_PATH, logEntry + Environment.NewLine);
+                string logEntry = $"[{screenInfo}] {message}";
+                Logger.WriteDebugLog(logEntry);
             }
             catch (Exception ex)
             {
@@ -117,15 +118,15 @@ namespace ScreenSaver
         private void InitializeAnimationControl()
         {
             WriteDebugLog("Creating animation control");
-            
+
             animationControl = new AnimationControl();
             animationControl.Dock = DockStyle.Fill;
-            
+
             // Apply all settings immediately
             animationControl.AnimationSpeed = effectDurationVal;
             animationControl.BorderColor = Color.Transparent;
             animationControl.BackColor = Color.Black;
-            
+
             // Always set font settings, let control handle visibility
             animationControl.showFileName = showFileName;
             animationControl.FileNameFont = fileNameFont;
@@ -133,7 +134,7 @@ namespace ScreenSaver
             animationControl.FileNameDisplayMode = fileNameDisplayMode;
 
             this.Controls.Add(animationControl);
-            
+
             WriteDebugLog($"Animation control created with settings: ShowFileName={showFileName}, FileNameDisplayMode={fileNameDisplayMode}");
         }
 
@@ -190,7 +191,7 @@ namespace ScreenSaver
 
             // Get folders from registry
             SortedDictionary<string, bool> imageFolders = registryManager.getImageFolders();
-            
+
             // If no folders configured, add user's Pictures folder as default
             if (imageFolders.Count == 0)
             {
@@ -201,7 +202,7 @@ namespace ScreenSaver
                     imageFolders.Add(picturesPath, false); // Add without subfolders by default
                 }
             }
-            
+
             // Get selected file types from registry
             string fileTypes = registryManager.getRegistryProperty(RegistryConstants.REG_KEY_FILE_TYPES);
             if (string.IsNullOrEmpty(fileTypes))
@@ -215,7 +216,7 @@ namespace ScreenSaver
             {
                 string folder = folderEntry.Key;
                 bool includeSubfolders = folderEntry.Value;
-                
+
                 if (Directory.Exists(folder))
                 {
                     try
@@ -243,7 +244,7 @@ namespace ScreenSaver
             if (imagesCount == 0)
             {
                 WriteDebugLog("No images found in configured folders, using embedded resources");
-                
+
                 // Get all embedded resources
                 var assembly = System.Reflection.Assembly.GetExecutingAssembly();
                 var resourceNames = assembly.GetManifestResourceNames()
@@ -257,7 +258,7 @@ namespace ScreenSaver
                         using (var image = Image.FromStream(stream))
                         {
                             string tempPath = Path.Combine(
-                                Path.GetTempPath(), 
+                                Path.GetTempPath(),
                                 $"screensaver_resource_{Path.GetFileName(resourceName)}"
                             );
                             image.Save(tempPath, System.Drawing.Imaging.ImageFormat.Jpeg);
@@ -372,6 +373,13 @@ namespace ScreenSaver
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
+            if ((DateTime.Now - lastKeyPressTime) < KEY_PRESS_DELAY)
+            {
+                // Too soon since the last key press, ignore this key
+                return true;
+            }
+            lastKeyPressTime = DateTime.Now; // Update last key press time
+
             switch (keyData)
             {
                 case Keys.Back:
