@@ -257,13 +257,14 @@ namespace ScreenSaver
                         using (var stream = assembly.GetManifestResourceStream(resourceName))
                         using (var image = Image.FromStream(stream))
                         {
+                            // Generate a unique temp filename for each instance
                             string tempPath = Path.Combine(
                                 Path.GetTempPath(),
-                                $"screensaver_resource_{Path.GetFileName(resourceName)}"
+                                $"screensaver_resource_{Guid.NewGuid()}_{Path.GetFileName(resourceName)}"
                             );
                             image.Save(tempPath, System.Drawing.Imaging.ImageFormat.Jpeg);
                             images.Add(tempPath);
-                            WriteDebugLog($"Added embedded resource: {resourceName}");
+                            WriteDebugLog($"Added embedded resource: {resourceName} to {tempPath}");
                         }
                     }
                     catch (Exception ex)
@@ -292,6 +293,12 @@ namespace ScreenSaver
 
         private void ShowNextImage()
         {
+            if (images == null || !images.Any())
+            {
+                WriteDebugLog("No images available to display.");
+                return;
+            }
+
             string fileName;
 
             // If we're not at the end of the history, move forward in history

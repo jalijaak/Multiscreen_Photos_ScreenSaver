@@ -10,6 +10,9 @@ namespace ScreenSaver
     {
         public static T PickRandom<T>(this IEnumerable<T> source)
         {
+            if (source == null || !source.Any())
+                throw new InvalidOperationException("Cannot pick a random item from an empty collection.");
+
             return source.PickRandom(1).Single();
         }
 
