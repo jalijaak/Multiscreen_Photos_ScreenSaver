@@ -5,11 +5,15 @@ using WMPLib;
 using System.IO;
 using System.Collections.Generic;
 using Microsoft.Win32;
+using static System.Net.Mime.MediaTypeNames;
+using System.Windows.Forms.VisualStyles;
 
 namespace ScreenSaver
 {
     public class VideoScreenSaverForm : ScreenSaverForm
     {
+        private RegistryManager registryManager;
+
         private AxWMPLib.AxWindowsMediaPlayer mediaPlayer;
         private List<string> videoFiles;
         private int currentVideoIndex;
@@ -20,6 +24,7 @@ namespace ScreenSaver
         private Font fileNameFont;
         private int fileNameDisplayMode;
         private string initialVideoPath;
+        private SortedDictionary<string, bool> imageFolders = new SortedDictionary<string, bool>();
 
         public VideoScreenSaverForm(int screenNumber, string videoPath) : base(screenNumber)
         {
@@ -33,6 +38,8 @@ namespace ScreenSaver
 
         private void InitializeComponent()
         {
+            this.registryManager = new RegistryManager();
+
             // Initialize Windows Media Player
             mediaPlayer = new AxWMPLib.AxWindowsMediaPlayer();
             ((System.ComponentModel.ISupportInitialize)(mediaPlayer)).BeginInit();
@@ -62,19 +69,19 @@ namespace ScreenSaver
 
         private void LoadSettings()
         {
-            using (RegistryKey key = Registry.CurrentUser.OpenSubKey("SOFTWARE\\MyScreenSaverTest"))
+            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RegistryConstants.REG_ROOT_PATH))
             {
                 if (key != null)
                 {
                     // Load video duration setting
-                    int durationIndex = int.Parse((string)key.GetValue("VideoDuration", "2"));
+                    int durationIndex = int.Parse((string)key.GetValue(RegistryConstants.REG_KEY_VideoDuration, "2"));
                     videoDurationSeconds = (durationIndex + 1) * 10; // Convert index to seconds (10, 20, 30, 40, 50)
                     
                     // Load file name display settings
-                    bool showFileName = bool.Parse((string)key.GetValue("ShowFileName", "False"));
-                    fileNameDisplayMode = int.Parse((string)key.GetValue("FileNameDisplayMode", "2"));
-                    string fontString = (string)key.GetValue("FileNameFont", "");
-                    string colorString = (string)key.GetValue("FileNameColor", "White");
+                    bool showFileName = bool.Parse((string)key.GetValue(RegistryConstants.REG_KEY_SHOW_FILENAME, "False"));
+                    fileNameDisplayMode = int.Parse((string)key.GetValue(RegistryConstants.REG_KEY_FILENAME_DISPLAY_MODE, "2"));
+                    string fontString = (string)key.GetValue(RegistryConstants.REG_KEY_FILENAME_FONT, "");
+                    string colorString = (string)key.GetValue(RegistryConstants.REG_KEY_FILENAME_COLOR, "White");
                     
                     fileNameLabel.Visible = showFileName;
                     if (!string.IsNullOrEmpty(fontString))
@@ -99,22 +106,34 @@ namespace ScreenSaver
             }
 
             // Otherwise load from registry settings
-            using (RegistryKey key = Registry.CurrentUser.OpenSubKey("SOFTWARE\\MyScreenSaverTest"))
+            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RegistryConstants.REG_ROOT_PATH))
             {
                 if (key != null)
                 {
-                    string videoFoldersStr = (string)key.GetValue("VideoFolders", "");
-                    if (!string.IsNullOrEmpty(videoFoldersStr))
+                    imageFolders = registryManager.getImageFolders();
+                    if (imageFolders.Count > 0)
                     {
-                        string[] videoFolders = videoFoldersStr.Split(';');
-                        foreach (string folder in videoFolders)
+                        foreach (KeyValuePair<string, bool> folderEntry in imageFolders)
                         {
+                            string folder = folderEntry.Key;
+                            bool includeSubfolders = folderEntry.Value;
+
                             if (Directory.Exists(folder))
                             {
-                                videoFiles.AddRange(Directory.GetFiles(folder, "*.mp4"));
-                                videoFiles.AddRange(Directory.GetFiles(folder, "*.avi"));
-                                videoFiles.AddRange(Directory.GetFiles(folder, "*.wmv"));
-                                videoFiles.AddRange(Directory.GetFiles(folder, "*.mov"));
+                                string[] supportedExtensions = "*.mp4;*.avi;*.wmv;*.mov".Split(';');
+                                try
+                                {
+                                    foreach (string extension in supportedExtensions)
+                                    {
+                                        SearchOption searchOption = includeSubfolders ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+                                        videoFiles.AddRange(Directory.GetFiles(folder, extension, searchOption));
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    Logger.WriteDebugLog($"Error accessing folder {folder}: {ex.Message}");
+                                    Console.WriteLine($"Error accessing folder {folder}: {ex.Message}");
+                                }
                             }
                         }
                     }
@@ -138,7 +157,7 @@ namespace ScreenSaver
             else
             {
                 MessageBox.Show("No video files found in the specified folders.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                Application.Exit();
+                System.Windows.Forms.Application.Exit();
             }
         }
 
@@ -187,7 +206,7 @@ namespace ScreenSaver
                     return fullPath;
                 case 1: // Relative path
                     try {
-                        string rootPath = Path.GetDirectoryName(Application.ExecutablePath);
+                        string rootPath = Path.GetDirectoryName(System.Windows.Forms.Application.ExecutablePath);
                         return GetRelativePath(rootPath, fullPath);
                     }
                     catch {

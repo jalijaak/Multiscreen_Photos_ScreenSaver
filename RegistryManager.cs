@@ -9,16 +9,11 @@ namespace ScreenSaver
 
     class RegistryManager
     {
-        //root registry entry location
-        private static string screenSaverRegRoot = RegistryConstants.REG_ROOT_PATH;
-        //data locations and fields - pairs
-        private static string imageFoldersRegSub = RegistryConstants.REG_FOLDERS_PATH;
-
         private SortedList<string, RegistryVal> RegistryProperties;
 
         public static string GetValue(string name, string defaultValue)
         {
-            string fullPath = Registry.CurrentUser.Name + "\\" + screenSaverRegRoot;
+            string fullPath = Registry.CurrentUser.Name + "\\" + RegistryConstants.REG_ROOT_PATH;
             object value = Registry.GetValue(fullPath, name, defaultValue);
             return value?.ToString() ?? defaultValue;
         }
@@ -89,13 +84,13 @@ namespace ScreenSaver
             RegistryKey rkey = Registry.CurrentUser;
 
             //Now let's open one of the sub keys
-            RegistryKey rkey1 = rkey.OpenSubKey(screenSaverRegRoot);
+            RegistryKey rkey1 = rkey.OpenSubKey(RegistryConstants.REG_ROOT_PATH);
 
             //if the registry folder is missing - create it
             if (rkey1 == null)
             {
-                System.Diagnostics.Debug.WriteLine($"Registry key {screenSaverRegRoot} not found, creating it");
-                rkey1 = rkey.CreateSubKey(screenSaverRegRoot);
+                System.Diagnostics.Debug.WriteLine($"Registry key {RegistryConstants.REG_ROOT_PATH} not found, creating it");
+                rkey1 = rkey.CreateSubKey(RegistryConstants.REG_ROOT_PATH);
             }
 
             //Now using GetValue(...) we read in various values 
@@ -179,12 +174,12 @@ namespace ScreenSaver
         private RegistryVal CreateNewRegistryProperty(string propertyName, bool isBoolean = false)
         {
             System.Diagnostics.Debug.WriteLine($"Creating new registry property: {propertyName}");
-            
+
             // First check if the key exists in registry
             RegistryKey rkey = Registry.CurrentUser;
-            RegistryKey rkey1 = rkey.OpenSubKey(screenSaverRegRoot);
+            RegistryKey rkey1 = rkey.OpenSubKey(RegistryConstants.REG_ROOT_PATH);
             string existingValue = null;
-            
+
             if (rkey1 != null)
             {
                 var regValue = rkey1.GetValue(propertyName);
@@ -221,7 +216,7 @@ namespace ScreenSaver
             try
             {
                 System.Diagnostics.Debug.WriteLine($"Setting boolean property: {propertyName} to value: {val}");
-                
+
                 // If property doesn't exist, add it
                 if (!RegistryProperties.ContainsKey(propertyName))
                 {
@@ -232,13 +227,15 @@ namespace ScreenSaver
 
                 RegistryVal regObj = RegistryProperties[propertyName];
                 if (regObj == null) { return; }
-                
+
                 if (getBooleanPropertyVal(propertyName) != val)
                 {
                     //find the required option
-                    foreach(String opt in regObj.PropertyOptions){
+                    foreach (String opt in regObj.PropertyOptions)
+                    {
                         Boolean t1 = opt.Equals(regObj.DefaultVal);
-                        if(!(t1 ^ val)){
+                        if (!(t1 ^ val))
+                        {
                             setRegistryProperty(propertyName, opt);
                             return;
                         }
@@ -257,7 +254,7 @@ namespace ScreenSaver
             try
             {
                 System.Diagnostics.Debug.WriteLine($"Setting registry property: {propertyName} to value: {newVal}");
-                
+
                 // Check if property exists in dictionary, if not add it
                 if (!RegistryProperties.ContainsKey(propertyName))
                 {
@@ -272,18 +269,18 @@ namespace ScreenSaver
                     System.Diagnostics.Debug.WriteLine($"Registry object is null for {propertyName}");
                     return;
                 }
-                
+
                 String currentVal = regObj.PropertyValue;
                 System.Diagnostics.Debug.WriteLine($"Current value: {currentVal}");
-                
+
                 if (!currentVal.Equals(newVal))
                 {
                     String userRoot = Registry.CurrentUser.Name;
-                    String fullRegPath = userRoot + "\\" + screenSaverRegRoot;
-                    
+                    String fullRegPath = userRoot + "\\" + RegistryConstants.REG_ROOT_PATH;
+
                     System.Diagnostics.Debug.WriteLine($"Updating registry at path: {fullRegPath}");
                     System.Diagnostics.Debug.WriteLine($"Registry name: {regObj.RegistryValName}");
-                    
+
                     Registry.SetValue(fullRegPath, regObj.RegistryValName, newVal, RegistryValueKind.String);
 
                     regObj.PropertyValue = newVal;
@@ -305,10 +302,10 @@ namespace ScreenSaver
         {
             // Get the registry key
             RegistryKey rkey = Registry.CurrentUser;
-            RegistryKey rkey1 = rkey.OpenSubKey(screenSaverRegRoot, true);
+            RegistryKey rkey1 = rkey.OpenSubKey(RegistryConstants.REG_ROOT_PATH, true);
             if (rkey1 == null)
             {
-                rkey1 = rkey.CreateSubKey(screenSaverRegRoot);
+                rkey1 = rkey.CreateSubKey(RegistryConstants.REG_ROOT_PATH);
             }
 
             // Check if value exists
@@ -334,7 +331,7 @@ namespace ScreenSaver
             try
             {
                 // Get registry key
-                using (RegistryKey key = Registry.CurrentUser.CreateSubKey(screenSaverRegRoot + imageFoldersRegSub))
+                using (RegistryKey key = Registry.CurrentUser.CreateSubKey(RegistryConstants.REG_ROOT_PATH + RegistryConstants.REG_ROOT_PATH))
                 {
                     // Clear existing values
                     foreach (string valueName in key.GetValueNames())
@@ -363,10 +360,10 @@ namespace ScreenSaver
         internal SortedDictionary<string, bool> getImageFolders()
         {
             SortedDictionary<string, bool> imageFolders = new SortedDictionary<string, bool>();
-            
+
             try
             {
-                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(screenSaverRegRoot + imageFoldersRegSub))
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RegistryConstants.REG_ROOT_PATH + RegistryConstants.REG_FOLDERS_PATH))
                 {
                     if (key != null)
                     {
@@ -395,7 +392,7 @@ namespace ScreenSaver
                 System.Diagnostics.Debug.WriteLine($"Error loading image folders: {ex.Message}");
                 // Return empty dictionary on error
             }
-            
+
             return imageFolders;
         }
 

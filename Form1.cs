@@ -26,6 +26,7 @@ namespace ScreenSaver
         private float effectDurationVal;
         private int delayBetweenImages;
         private List<AnimationTypes> effectsList = new List<AnimationTypes>();
+        private SortedDictionary<string, bool> imageFolders = new SortedDictionary<string, bool>();
         private List<String> images = new List<string>();
         private AnimationControl animationControl; // Single control instead of list
         private int imagesCount = 0;
@@ -190,7 +191,7 @@ namespace ScreenSaver
             imageHistory = new List<string>();
 
             // Get folders from registry
-            SortedDictionary<string, bool> imageFolders = registryManager.getImageFolders();
+            imageFolders = registryManager.getImageFolders();
 
             // If no folders configured, add user's Pictures folder as default
             if (imageFolders.Count == 0)
@@ -352,7 +353,7 @@ namespace ScreenSaver
                 switch (fileNameDisplayMode)
                 {
                     case 0: displayName = fileName; break;
-                    case 1: displayName = GetRelativePath(Application.ExecutablePath, fileName); break;
+                    case 1: displayName = GetRelativePath(fileName); break;
                     case 2: displayName = Path.GetFileName(fileName); break;
                     default: displayName = fileName; break;
                 }
@@ -462,27 +463,44 @@ namespace ScreenSaver
             }
         }
 
-        private string GetRelativePath(string rootPath, string fullPath)
+        private string GetRelativePath(string fullPath)
         {
-            if (string.IsNullOrEmpty(rootPath)) return fullPath;
+            if (string.IsNullOrEmpty(fullPath) || imageFolders == null)
+                return fullPath;
 
             try
             {
-                // Convert paths to use the same directory separator
-                rootPath = Path.GetFullPath(rootPath).TrimEnd(Path.DirectorySeparatorChar);
+                string bestMatch = null;
+                int bestMatchLength = -1;
+
                 fullPath = Path.GetFullPath(fullPath);
 
-                // Check if paths are on different drives
-                if (!fullPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
-                    return fullPath;
+                foreach (var folderEntry in imageFolders)
+                {
+                    string baseFolder = Path.GetFullPath(folderEntry.Key.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar);
 
-                // Remove the root path and leading separator
-                string relativePath = fullPath.Substring(rootPath.Length).TrimStart(Path.DirectorySeparatorChar);
-                return string.IsNullOrEmpty(relativePath) ? "." : relativePath;
+                    if (fullPath.StartsWith(baseFolder, StringComparison.OrdinalIgnoreCase)
+                        && baseFolder.Length > bestMatchLength)
+                    {
+                        bestMatch = baseFolder;
+                        bestMatchLength = baseFolder.Length;
+                    }
+                }
+
+                if (bestMatch != null)
+                {
+                    string relativePath = fullPath.Substring(bestMatchLength);
+                    return relativePath;
+                }
+                else
+                {
+                    // If no matching folder is found, return the absolute path
+                    return fullPath;
+                }
             }
             catch
             {
-                // If any error occurs (like invalid paths), return the full path
+                // Return absolute path on error
                 return fullPath;
             }
         }

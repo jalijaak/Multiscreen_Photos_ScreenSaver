@@ -287,6 +287,7 @@
             this.comboBoxFileNameDisplay.Name = "comboBoxFileNameDisplay";
             this.comboBoxFileNameDisplay.Size = new System.Drawing.Size(150, 21);
             this.comboBoxFileNameDisplay.TabIndex = 16;
+            this.comboBoxFileNameDisplay.Tag = RegistryConstants.REG_KEY_FILENAME_DISPLAY_MODE;
             this.comboBoxFileNameDisplay.SelectedIndexChanged += new System.EventHandler(this.comboBoxFileNameDisplay_SelectedIndexChanged);
             // 
             // labelFileNameSample

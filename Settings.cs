@@ -15,13 +15,6 @@ namespace ScreenSaver
         private static RegistryManager registryManager;
         private List<Form1> previewForms;
 
-        // Registry property keys
-        private const string PROP_SHOW_FILENAME = "ShowFileName";
-        private const string PROP_FILENAME_DISPLAY_MODE = "FileNameDisplayMode";
-        private const string PROP_FILENAME_FONT = "FileNameFont";
-        private const string PROP_FILENAME_COLOR = "FileNameColor";
-        private const string PROP_FILE_TYPES = "FileTypes";
-
         public bool UseTransitions
         {
             get { return chkUseTransitions.Checked; }
@@ -171,8 +164,15 @@ namespace ScreenSaver
                             break;
 
                         case ComboBox cb:
-                            cb.Items.AddRange(registryManager.getRegistryPropertyOptions(cb.Tag.ToString()).ToArray());
-                            cb.SelectedItem = registryManager.getRegistryProperty(cb.Tag.ToString());
+                            if(cb.Tag.ToString().Equals(RegistryConstants.REG_KEY_FILENAME_DISPLAY_MODE))
+                            {
+                                cb.SelectedIndex = Convert.ToInt32(registryManager.getRegistryProperty(cb.Tag.ToString()));
+                            }
+                            else
+                            {
+                                cb.Items.AddRange(registryManager.getRegistryPropertyOptions(cb.Tag.ToString()).ToArray());
+                                cb.SelectedItem = registryManager.getRegistryProperty(cb.Tag.ToString());
+                            }
                             break;
 
                         case ListView lv:
@@ -268,7 +268,7 @@ namespace ScreenSaver
 
         private void LoadFileTypeSelections()
         {
-            string fileTypes = registryManager.getRegistryProperty(PROP_FILE_TYPES);
+            string fileTypes = registryManager.getRegistryProperty(RegistryConstants.REG_KEY_FILE_TYPES);
             if (!string.IsNullOrEmpty(fileTypes))
             {
                 string[] selectedTypes = fileTypes.Split(';');
@@ -332,13 +332,13 @@ namespace ScreenSaver
                         selectedFileTypes.Append(item.Name);
                     }
                 }
-                registryManager.setRegistryProperty(PROP_FILE_TYPES, selectedFileTypes.ToString());
+                registryManager.setRegistryProperty(RegistryConstants.REG_KEY_FILE_TYPES, selectedFileTypes.ToString());
 
                 // Save other settings
-                registryManager.setRegistryProperty(PROP_SHOW_FILENAME, cbx_showFileNames.Checked.ToString());
-                registryManager.setRegistryProperty(PROP_FILENAME_DISPLAY_MODE, comboBoxFileNameDisplay.SelectedIndex.ToString());
-                registryManager.setRegistryProperty(PROP_FILENAME_FONT, FontToString(labelFileNameSample.Font));
-                registryManager.setRegistryProperty(PROP_FILENAME_COLOR, ColorTranslator.ToHtml(labelFileNameSample.ForeColor));
+                registryManager.setRegistryProperty(RegistryConstants.REG_KEY_SHOW_FILENAME, cbx_showFileNames.Checked.ToString());
+                registryManager.setRegistryProperty(RegistryConstants.REG_KEY_FILENAME_DISPLAY_MODE, comboBoxFileNameDisplay.SelectedIndex.ToString());
+                registryManager.setRegistryProperty(RegistryConstants.REG_KEY_FILENAME_FONT, FontToString(labelFileNameSample.Font));
+                registryManager.setRegistryProperty(RegistryConstants.REG_KEY_FILENAME_COLOR, ColorTranslator.ToHtml(labelFileNameSample.ForeColor));
 
                 // Save debug setting
                 registryManager.setBooleanPropertyVal(RegistryConstants.REG_KEY_DEBUG, cbx_debug.Checked);

@@ -914,8 +914,6 @@ namespace ScreenSaver
                     // --------------->
                     case AnimationTypes.Spiral:
                         // Image spiral effect
-
-
                         if (m_AnimationPercent < 100)
                         {
                             double percentageAngle = m_Divider * (Math.PI * 2) / 100;

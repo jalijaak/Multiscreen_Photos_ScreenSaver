@@ -17,6 +17,8 @@ namespace ScreenSaver
         public const string REG_KEY_EFFECT_FRAMES = "EffectFrames";
         public const string REG_KEY_USE_EFFECTS = "Use Effects";
 
+        public const string REG_KEY_VideoDuration = "VideoDuration";
+
         // Registry root paths
         public const string REG_ROOT_PATH = "SOFTWARE\\MyScreenSaverTest";
         public const string REG_FOLDERS_PATH = "\\Folders";
