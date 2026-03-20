@@ -237,14 +237,21 @@ namespace ScreenSaver
             try
             {
                 string[] parts = fontString.Split(';');
+
+                if (parts.Length < 3)
+                    throw new ArgumentException("Invalid font string format.");
+
                 string fontFamily = parts[0];
                 float fontSize = float.Parse(parts[1]);
-                FontStyle style = (FontStyle)Enum.Parse(typeof(FontStyle), parts[2]);
+
+                if (!Enum.TryParse(parts[2], true, out FontStyle style))
+                    style = FontStyle.Regular;
+
                 return new Font(fontFamily, fontSize, style);
             }
             catch
             {
-                return new Font("Arial", 10, FontStyle.Regular);
+                return new Font("Arial", 12, FontStyle.Regular);
             }
         }
 

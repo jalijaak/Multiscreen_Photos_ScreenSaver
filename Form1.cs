@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -440,9 +440,16 @@ namespace ScreenSaver
             try
             {
                 string[] parts = fontString.Split(';');
+
+                if (parts.Length < 3)
+                    throw new ArgumentException("Invalid font string format.");
+
                 string fontFamily = parts[0];
                 float fontSize = float.Parse(parts[1]);
-                FontStyle style = (FontStyle)Enum.Parse(typeof(FontStyle), parts[2]);
+
+                if (!Enum.TryParse(parts[2], true, out FontStyle style))
+                    style = FontStyle.Regular;
+
                 return new Font(fontFamily, fontSize, style);
             }
             catch

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Data;
@@ -366,6 +366,10 @@ namespace ScreenSaver
                     destRectangle.X = newTopLeft;
 
                 }
+                // Stable copy for filename contrast sampling.
+                // Some animation branches mutate `destRectangle`, but the text/background
+                // relationship we sample is based on the original aspect-fit bounds.
+                Rectangle aspectFitDestRectangle = destRectangle;
                 //save original graphic transform for file name dispaly
                 System.Drawing.Drawing2D.Matrix originalTransform = g.Transform;
 
@@ -1011,11 +1015,31 @@ namespace ScreenSaver
                     //float width = ((float)sourceRectangle.Size.Width) - 2 * padx;
                     //float height = ((float)sourceRectangle.Size.Height) - 2 * pady;;
 
-                    float m_fontSize = 10;
-
                     //return to original transformation
                     g.Transform = originalTransform;
-                    g.DrawString(imageName, new Font(FontFamily.GenericSansSerif, m_fontSize, FontStyle.Regular), new SolidBrush(Color.White), 0, 0);
+                    
+                    string displayText = GetFormattedFileName();
+                    if (!string.IsNullOrEmpty(displayText))
+                    {
+                        GetContrastingFileNameColors(
+                            g,
+                            m_AnimatedBitmap,
+                            displayText,
+                            FileNameFont,
+                            aspectFitDestRectangle,
+                            out Color textColor,
+                            out Color shadowColor);
+
+                        using (Brush shadowBrush = new SolidBrush(shadowColor))
+                        {
+                            g.DrawString(displayText, FileNameFont, shadowBrush, 11, 11);
+                        }
+
+                        using (Brush textBrush = new SolidBrush(textColor))
+                        {
+                            g.DrawString(displayText, FileNameFont, textBrush, 10, 10);
+                        }
+                    }
                 }
             }
 
@@ -1073,14 +1097,23 @@ namespace ScreenSaver
                         string displayText = GetFormattedFileName();
                         if (!string.IsNullOrEmpty(displayText))
                         {
+                            GetContrastingFileNameColors(
+                                e.Graphics,
+                                AnimatedImage,
+                                displayText,
+                                FileNameFont,
+                                destRectangle,
+                                out Color textColor,
+                                out Color shadowColor);
+
                             // Create shadow effect
-                            using (Brush shadowBrush = new SolidBrush(Color.FromArgb(64, 0, 0, 0)))
+                            using (Brush shadowBrush = new SolidBrush(shadowColor))
                             {
                                 e.Graphics.DrawString(displayText, FileNameFont, shadowBrush, 11, 11);
                             }
-                            
+
                             // Draw the actual text
-                            using (Brush textBrush = new SolidBrush(FileNameColor))
+                            using (Brush textBrush = new SolidBrush(textColor))
                             {
                                 e.Graphics.DrawString(displayText, FileNameFont, textBrush, 10, 10);
                             }
@@ -1171,6 +1204,168 @@ namespace ScreenSaver
                 default:
                     return System.IO.Path.GetFileName(imageName);
             }
+        }
+
+        private static double GetLuminance(Color c)
+        {
+            // Relative luminance for contrast decisions (rough but fast).
+            return (0.2126 * c.R) + (0.7152 * c.G) + (0.0722 * c.B);
+        }
+
+        private void GetContrastingFileNameColors(
+            Graphics g,
+            Bitmap bmp,
+            string displayText,
+            Font font,
+            Rectangle destRectangle,
+            out Color textColor,
+            out Color shadowColor)
+        {
+            // Defaults: keep user selection, with a black shadow.
+            textColor = FileNameColor;
+            shadowColor = Color.FromArgb(64, 0, 0, 0);
+
+            try
+            {
+                if (bmp == null || font == null || string.IsNullOrEmpty(displayText))
+                    return;
+
+                if (destRectangle.Width <= 0 || destRectangle.Height <= 0 || bmp.Width <= 0 || bmp.Height <= 0)
+                    return;
+
+                // Filename is drawn at a fixed offset in this control.
+                const float textX = 10f;
+                const float textY = 10f;
+
+                SizeF measured = g.MeasureString(displayText, font);
+
+                // Sample a region around the text location (clamped to the drawn image area).
+                float sampleLeft = textX;
+                float sampleTop = textY;
+                float sampleRight = textX + measured.Width + 6f;
+                float sampleBottom = textY + measured.Height + 6f;
+
+                float interLeft = Math.Max(sampleLeft, destRectangle.Left);
+                float interTop = Math.Max(sampleTop, destRectangle.Top);
+                float interRight = Math.Min(sampleRight, destRectangle.Right);
+                float interBottom = Math.Min(sampleBottom, destRectangle.Bottom);
+
+                if (interRight <= interLeft || interBottom <= interTop)
+                {
+                    // The text is over letterboxing/background; approximate using the same
+                    // background color that DrawBackground() fills with.
+                    Color fallbackBg = this.Transparent ? this.BackColor : this.TransparentColor;
+                    double avgLumFallback = GetLuminance(fallbackBg);
+                    textColor = ChooseBestContrastingTextColor(avgLumFallback);
+                    shadowColor = GetShadowForText(textColor);
+                    return;
+                }
+
+                // Sample a small grid to keep it fast enough for the screensaver.
+                const int samplesX = 6;
+                const int samplesY = 4;
+
+                double lumSum = 0;
+                int lumCount = 0;
+
+                for (int ix = 0; ix < samplesX; ix++)
+                {
+                    float x = interLeft + (ix + 0.5f) * (interRight - interLeft) / samplesX;
+                    for (int iy = 0; iy < samplesY; iy++)
+                    {
+                        float y = interTop + (iy + 0.5f) * (interBottom - interTop) / samplesY;
+
+                        // Map from control coordinates back into the source bitmap coordinates.
+                        float relX = (x - destRectangle.Left) / (float)destRectangle.Width;
+                        float relY = (y - destRectangle.Top) / (float)destRectangle.Height;
+
+                        int srcX = Math.Max(0, Math.Min(bmp.Width - 1, (int)(relX * bmp.Width)));
+                        int srcY = Math.Max(0, Math.Min(bmp.Height - 1, (int)(relY * bmp.Height)));
+
+                        Color px = bmp.GetPixel(srcX, srcY);
+                        lumSum += GetLuminance(px);
+                        lumCount++;
+                    }
+                }
+
+                if (lumCount <= 0)
+                    return;
+
+                double avgLum = lumSum / lumCount;
+
+                // Choose the color among: user-selected, black, and white
+                // that gives the strongest contrast with the sampled background.
+                textColor = ChooseBestContrastingTextColor(avgLum);
+                shadowColor = GetShadowForText(textColor);
+            }
+            catch
+            {
+                // If sampling fails for any reason, fall back to the user color.
+                textColor = FileNameColor;
+                shadowColor = Color.FromArgb(64, 0, 0, 0);
+            }
+        }
+
+        private Color ChooseBestContrastingTextColor(double backgroundLuminance)
+        {
+            // Prefer user-selected color when it already provides good contrast.
+            Color[] candidates = new Color[] { FileNameColor, Color.Black, Color.White };
+            Color best = FileNameColor;
+            double bestScore = double.MinValue;
+
+            // If we're over a dark/blank region (e.g., letterboxing with black bars),
+            // bias toward light text to maximize readability.
+            // User requested stronger preference to white/light, so we trigger this
+            // earlier and boost light candidates more.
+            bool preferLight = backgroundLuminance < 95;
+
+            foreach (Color candidate in candidates)
+            {
+                double candidateLum = GetLuminance(candidate);
+                double score = Math.Abs(backgroundLuminance - candidateLum);
+
+                if (preferLight)
+                {
+                    // Strong preference boost for light/white candidates.
+                    // This intentionally overrides user-selected dark colors on dark/blank backgrounds.
+                    if (candidateLum >= 128) score += 55;
+                    if (candidate.ToArgb() == Color.White.ToArgb()) score += 25;
+                    if (candidateLum < 80) score -= 35; // strongly discourage black/dark
+                }
+                else
+                {
+                    // On bright backgrounds, lightly prefer dark candidates.
+                    if (candidateLum < 128) score += 10;
+                }
+
+                // Tie-break: prefer lighter text when preferLight is enabled.
+                // Use a small epsilon to account for floating point rounding.
+                if (Math.Abs(score - bestScore) < 0.01 && preferLight)
+                {
+                    if (candidateLum > GetLuminance(best) || candidate.ToArgb() == Color.White.ToArgb())
+                    {
+                        best = candidate;
+                        bestScore = score;
+                    }
+                    continue;
+                }
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    best = candidate;
+                }
+            }
+
+            return best;
+        }
+
+        private static Color GetShadowForText(Color textColor)
+        {
+            bool textIsLight = GetLuminance(textColor) >= 128;
+            return textIsLight
+                ? Color.FromArgb(64, 0, 0, 0)
+                : Color.FromArgb(64, 255, 255, 255);
         }
     }
 }

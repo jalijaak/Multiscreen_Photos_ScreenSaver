@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -128,6 +128,18 @@ namespace ScreenSaver
 
                 // Load file type selections
                 LoadFileTypeSelections();
+
+                // Load filename font + color explicitly (these aren't handled by LoadControlSettings).
+                // This prevents overwriting saved registry values with designer defaults.
+                string fontString = RegistryManager.GetValue(RegistryConstants.REG_KEY_FILENAME_FONT, "");
+                labelFileNameSample.Font = !string.IsNullOrEmpty(fontString)
+                    ? StringToFont(fontString)
+                    : new Font("Arial", 12, FontStyle.Regular);
+
+                string colorString = RegistryManager.GetValue(RegistryConstants.REG_KEY_FILENAME_COLOR, "White");
+                labelFileNameSample.ForeColor = ColorTranslator.FromHtml(colorString);
+
+                UpdateFileNameSamplePreviewBackground();
 
                 // Update UI visibility based on loaded settings
                 UpdateUIVisibility();
@@ -499,11 +511,16 @@ namespace ScreenSaver
 
         private void btnChangeFont_Click(object sender, EventArgs e)
         {
+            // Load current values into the dialog so it opens with the correct selection.
+            fontDialog1.Font = labelFileNameSample.Font;
+            fontDialog1.Color = labelFileNameSample.ForeColor;
+
             if (fontDialog1.ShowDialog() == DialogResult.OK)
             {
                 // Update both labels with the new font and color
                 this.labelFileNameSample.Font = fontDialog1.Font;
                 this.labelFileNameSample.ForeColor = fontDialog1.Color;
+                UpdateFileNameSamplePreviewBackground();
                 SaveSettings();
             }
         }
@@ -529,14 +546,21 @@ namespace ScreenSaver
             try
             {
                 string[] parts = fontString.Split(';');
+
+                if (parts.Length < 3)
+                    throw new ArgumentException("Invalid font string format.");
+
                 string fontFamily = parts[0];
                 float fontSize = float.Parse(parts[1]);
-                FontStyle style = (FontStyle)Enum.Parse(typeof(FontStyle), parts[2]);
+
+                if (!Enum.TryParse(parts[2], true, out FontStyle style))
+                    style = FontStyle.Regular;
+
                 return new Font(fontFamily, fontSize, style);
             }
             catch
             {
-                return new Font("Arial", 10, FontStyle.Regular);
+                return new Font("Arial", 12, FontStyle.Regular);
             }
         }
 
@@ -576,6 +600,22 @@ namespace ScreenSaver
             {
                 labelFileNameSample.Text = "Sample Image.jpg";
             }
+
+            UpdateFileNameSamplePreviewBackground();
+        }
+
+        private void UpdateFileNameSamplePreviewBackground()
+        {
+            // Give the preview label a contrasting background so the chosen font color
+            // is always easy to read.
+            Color fore = labelFileNameSample.ForeColor;
+
+            // Relative luminance (0..255 scale-ish), weighted for perceptual brightness.
+            double luminance = (0.2126 * fore.R) + (0.7152 * fore.G) + (0.0722 * fore.B);
+
+            // If the font is light, use a dark background; otherwise use a light background.
+            labelFileNameSample.BackColor = luminance > 140 ? Color.Black : Color.White;
+            labelFileNameSample.BorderStyle = BorderStyle.FixedSingle;
         }
 
         private string GetRelativePath(string rootPath, string fullPath)
