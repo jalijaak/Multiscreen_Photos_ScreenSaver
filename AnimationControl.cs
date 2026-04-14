@@ -1009,36 +1009,13 @@ namespace ScreenSaver
                 //show file name field
                 if (m_showFileName)
                 {
-                    float padx = ((float)sourceRectangle.Size.Width) * (0.05F);
-                    float pady = ((float)sourceRectangle.Size.Height) * (0.05F);
-
-                    //float width = ((float)sourceRectangle.Size.Width) - 2 * padx;
-                    //float height = ((float)sourceRectangle.Size.Height) - 2 * pady;;
-
                     //return to original transformation
                     g.Transform = originalTransform;
                     
                     string displayText = GetFormattedFileName();
                     if (!string.IsNullOrEmpty(displayText))
                     {
-                        GetContrastingFileNameColors(
-                            g,
-                            m_AnimatedBitmap,
-                            displayText,
-                            FileNameFont,
-                            aspectFitDestRectangle,
-                            out Color textColor,
-                            out Color shadowColor);
-
-                        using (Brush shadowBrush = new SolidBrush(shadowColor))
-                        {
-                            g.DrawString(displayText, FileNameFont, shadowBrush, 11, 11);
-                        }
-
-                        using (Brush textBrush = new SolidBrush(textColor))
-                        {
-                            g.DrawString(displayText, FileNameFont, textBrush, 10, 10);
-                        }
+                        DrawFileName(g, displayText, aspectFitDestRectangle, m_AnimatedBitmap);
                     }
                 }
             }
@@ -1097,26 +1074,7 @@ namespace ScreenSaver
                         string displayText = GetFormattedFileName();
                         if (!string.IsNullOrEmpty(displayText))
                         {
-                            GetContrastingFileNameColors(
-                                e.Graphics,
-                                AnimatedImage,
-                                displayText,
-                                FileNameFont,
-                                destRectangle,
-                                out Color textColor,
-                                out Color shadowColor);
-
-                            // Create shadow effect
-                            using (Brush shadowBrush = new SolidBrush(shadowColor))
-                            {
-                                e.Graphics.DrawString(displayText, FileNameFont, shadowBrush, 11, 11);
-                            }
-
-                            // Draw the actual text
-                            using (Brush textBrush = new SolidBrush(textColor))
-                            {
-                                e.Graphics.DrawString(displayText, FileNameFont, textBrush, 10, 10);
-                            }
+                            DrawFileName(e.Graphics, displayText, destRectangle, AnimatedImage);
                         }
                     }
                 }
@@ -1366,6 +1324,55 @@ namespace ScreenSaver
             return textIsLight
                 ? Color.FromArgb(64, 0, 0, 0)
                 : Color.FromArgb(64, 255, 255, 255);
+        }
+
+        private void DrawFileName(Graphics g, string displayText, Rectangle destRectangle, Bitmap bmp)
+        {
+            // If image does not fill the screen (letterbox/pillarbox), force simple
+            // white text on solid black background for readability.
+            bool imageDoesNotFillScreen =
+                destRectangle.Width < this.ClientRectangle.Width ||
+                destRectangle.Height < this.ClientRectangle.Height;
+
+            if (imageDoesNotFillScreen)
+            {
+                const float textX = 10f;
+                const float textY = 10f;
+                SizeF measured = g.MeasureString(displayText, FileNameFont);
+                RectangleF bgRect = new RectangleF(
+                    textX - 4f,
+                    textY - 2f,
+                    measured.Width + 8f,
+                    measured.Height + 4f);
+
+                using (Brush bgBrush = new SolidBrush(Color.Black))
+                {
+                    g.FillRectangle(bgBrush, bgRect);
+                }
+                using (Brush textBrush = new SolidBrush(Color.White))
+                {
+                    g.DrawString(displayText, FileNameFont, textBrush, textX, textY);
+                }
+                return;
+            }
+
+            GetContrastingFileNameColors(
+                g,
+                bmp,
+                displayText,
+                FileNameFont,
+                destRectangle,
+                out Color textColor,
+                out Color shadowColor);
+
+            using (Brush shadowBrush = new SolidBrush(shadowColor))
+            {
+                g.DrawString(displayText, FileNameFont, shadowBrush, 11, 11);
+            }
+            using (Brush textBrush = new SolidBrush(textColor))
+            {
+                g.DrawString(displayText, FileNameFont, textBrush, 10, 10);
+            }
         }
     }
 }

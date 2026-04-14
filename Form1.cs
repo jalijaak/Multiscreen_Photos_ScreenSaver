@@ -87,18 +87,17 @@ namespace ScreenSaver
             this.isPreviewMode = isPreview;
 
             WriteDebugLog($"Initializing screensaver form (Preview: {isPreview})");
-            WriteDebugLog($"Command line arguments: {string.Join(" ", Environment.GetCommandLineArgs())}");
 
             // Load delay between images setting (in seconds) and set timer interval (in milliseconds)
             delayBetweenImages = int.Parse(registryManager.getRegistryProperty(RegistryConstants.REG_KEY_DELAY_BETWEEN_IMAGES, "5"));
             timer1.Interval = delayBetweenImages * 1000;
-            WriteDebugLog($"Setting image refresh interval to {delayBetweenImages} seconds");
 
             this.FormBorderStyle = FormBorderStyle.None;
             this.Top = screen.Bounds.Top;
             this.Left = screen.Bounds.Left;
             this.ClientSize = new System.Drawing.Size(screen.Bounds.Width, screen.Bounds.Height);
             this.ShowInTaskbar = false;
+            this.TopMost = true;
 
             WriteDebugLog($"Loading settings for screen {screen.DeviceName} at {screen.Bounds}");
 
@@ -153,8 +152,16 @@ namespace ScreenSaver
 
         private void LoadEffectSettings()
         {
-            // Get transitions setting directly from Settings form
-            useEffects = parent.UseTransitions;
+            // In normal preview flow we get this from Settings form.
+            // In /s screensaver mode parent is null, so read from registry.
+            if (parent != null)
+            {
+                useEffects = parent.UseTransitions;
+            }
+            else
+            {
+                useEffects = registryManager.getBooleanPropertyVal(RegistryConstants.REG_KEY_USE_EFFECTS, true);
+            }
             effectDurationVal = float.Parse(RegistryManager.GetValue(RegistryConstants.REG_KEY_EFFECT_DURATION, "2"));
 
             // Clear existing effects list
@@ -212,6 +219,8 @@ namespace ScreenSaver
             }
             string[] supportedExtensions = fileTypes.Split(';');
 
+            HashSet<string> uniqueImages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
             // Load files from each folder
             foreach (KeyValuePair<string, bool> folderEntry in imageFolders)
             {
@@ -225,10 +234,18 @@ namespace ScreenSaver
                         foreach (string extension in supportedExtensions)
                         {
                             SearchOption searchOption = includeSubfolders ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
-                            images.AddRange(Directory.GetFiles(folder, extension, searchOption));
+                            foreach (string imagePath in Directory.EnumerateFiles(folder, extension, searchOption))
+                            {
+                                uniqueImages.Add(imagePath);
+                            }
                         }
                     }
-                    catch (Exception ex)
+                    catch (UnauthorizedAccessException ex)
+                    {
+                        WriteDebugLog($"Error accessing folder {folder}: {ex.Message}");
+                        Console.WriteLine($"Error accessing folder {folder}: {ex.Message}");
+                    }
+                    catch (DirectoryNotFoundException ex)
                     {
                         WriteDebugLog($"Error accessing folder {folder}: {ex.Message}");
                         Console.WriteLine($"Error accessing folder {folder}: {ex.Message}");
@@ -239,6 +256,8 @@ namespace ScreenSaver
                     WriteDebugLog($"{folder} doesn't exists");
                 }
             }
+
+            images = uniqueImages.ToList();
 
             //check for empty list
             imagesCount = images.Count;
@@ -411,7 +430,14 @@ namespace ScreenSaver
                     }
                     else
                     {
-                        parent?.CloseAllFrames();
+                        if (parent != null)
+                        {
+                            parent.CloseAllFrames();
+                        }
+                        else
+                        {
+                            Application.Exit();
+                        }
                     }
                     return true;
                 default:
@@ -431,8 +457,36 @@ namespace ScreenSaver
 
         private void Form1_Resize(object sender, EventArgs e)
         {
-            this.Top = screen.Bounds.Top;
-            this.Left = screen.Bounds.Left;
+            if (!isPreviewMode && screen != null)
+            {
+                this.Bounds = screen.Bounds;
+            }
+        }
+
+        private void Form1_Shown(object sender, EventArgs e)
+        {
+            if (isPreviewMode) { return; }
+
+            try
+            {
+                Screen actualScreen = Screen.FromHandle(this.Handle);
+
+                // If Windows attached this form to a different monitor than expected, align to actual.
+                if (screen == null || !screen.DeviceName.Equals(actualScreen.DeviceName, StringComparison.OrdinalIgnoreCase))
+                {
+                    screen = actualScreen;
+                }
+
+                this.Bounds = screen.Bounds;
+                if (isPreviewMode)
+                {
+                    WriteDebugLog($"Preview shown: AssignedScreen={screen.DeviceName}, HandleScreen={actualScreen.DeviceName}, Bounds={this.Bounds}, Visible={this.Visible}");
+                }
+            }
+            catch (Exception ex)
+            {
+                WriteDebugLog($"Form1_Shown error while mapping handle screen: {ex.Message}");
+            }
         }
 
         private Font StringToFont(string fontString)

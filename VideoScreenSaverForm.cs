@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using Microsoft.Win32;
 using static System.Net.Mime.MediaTypeNames;
 using System.Windows.Forms.VisualStyles;
+using System.Linq;
 
 namespace ScreenSaver
 {
@@ -97,6 +98,7 @@ namespace ScreenSaver
         private void LoadVideoFiles()
         {
             videoFiles = new List<string>();
+            HashSet<string> uniqueVideos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             
             // If we have an initial video path, use only that
             if (!string.IsNullOrEmpty(initialVideoPath))
@@ -126,10 +128,18 @@ namespace ScreenSaver
                                     foreach (string extension in supportedExtensions)
                                     {
                                         SearchOption searchOption = includeSubfolders ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
-                                        videoFiles.AddRange(Directory.GetFiles(folder, extension, searchOption));
+                                        foreach (string videoPath in Directory.EnumerateFiles(folder, extension, searchOption))
+                                        {
+                                            uniqueVideos.Add(videoPath);
+                                        }
                                     }
                                 }
-                                catch (Exception ex)
+                                catch (UnauthorizedAccessException ex)
+                                {
+                                    Logger.WriteDebugLog($"Error accessing folder {folder}: {ex.Message}");
+                                    Console.WriteLine($"Error accessing folder {folder}: {ex.Message}");
+                                }
+                                catch (DirectoryNotFoundException ex)
                                 {
                                     Logger.WriteDebugLog($"Error accessing folder {folder}: {ex.Message}");
                                     Console.WriteLine($"Error accessing folder {folder}: {ex.Message}");
@@ -139,6 +149,8 @@ namespace ScreenSaver
                     }
                 }
             }
+
+            videoFiles = uniqueVideos.ToList();
 
             if (videoFiles.Count > 0)
             {

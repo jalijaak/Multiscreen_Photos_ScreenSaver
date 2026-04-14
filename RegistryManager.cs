@@ -67,7 +67,7 @@ namespace ScreenSaver
             RegistryPropertiesList.Add(new RegistryVal(RegistryConstants.REG_KEY_IMAGE_ORDER, RegistryVal.propertyType.Free, null,
                 new List<string> { "Yes", "No" }, "No", RegistryConstants.REG_KEY_IMAGE_ORDER));
             RegistryPropertiesList.Add(new RegistryVal(RegistryConstants.REG_KEY_DEBUG, RegistryVal.propertyType.Free, null,
-                new List<string> { "Yes", "No" }, "Yes", RegistryConstants.REG_KEY_DEBUG));
+                new List<string> { "Yes", "No" }, "No", RegistryConstants.REG_KEY_DEBUG));
 
             RegistryProperties = new SortedList<string, RegistryVal>();
             foreach (RegistryVal regVal in RegistryPropertiesList)
@@ -154,9 +154,9 @@ namespace ScreenSaver
                 {
                     System.Diagnostics.Debug.WriteLine($"Property {propertyName} not found in RegistryProperties, adding it");
                     var newProp = new RegistryVal(propertyName, RegistryVal.propertyType.Free, null,
-                        new List<string> { "Yes", "No" }, "Yes", propertyName);
+                        new List<string> { "Yes", "No" }, "No", propertyName);
                     RegistryProperties.Add(propertyName, newProp);
-                    return defaultValue; // Return default value (Yes = true)
+                    return defaultValue;
                 }
 
                 RegistryVal regObj = RegistryProperties[propertyName];
@@ -196,7 +196,7 @@ namespace ScreenSaver
                 // For boolean properties
                 var newProp = new RegistryVal(propertyName, RegistryVal.propertyType.Free, null,
                     new List<string> { "Yes", "No" },
-                    existingValue ?? "Yes", // Use existing value if found, otherwise default to "Yes"
+                    existingValue ?? "No", // Use existing value if found, otherwise default to "No"
                     propertyName);
                 return newProp;
             }
@@ -331,7 +331,7 @@ namespace ScreenSaver
             try
             {
                 // Get registry key
-                using (RegistryKey key = Registry.CurrentUser.CreateSubKey(RegistryConstants.REG_ROOT_PATH + RegistryConstants.REG_ROOT_PATH))
+                using (RegistryKey key = Registry.CurrentUser.CreateSubKey(RegistryConstants.REG_ROOT_PATH + RegistryConstants.REG_FOLDERS_PATH))
                 {
                     // Clear existing values
                     foreach (string valueName in key.GetValueNames())
@@ -363,27 +363,26 @@ namespace ScreenSaver
 
             try
             {
-                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RegistryConstants.REG_ROOT_PATH + RegistryConstants.REG_FOLDERS_PATH))
+                string foldersPath = RegistryConstants.REG_ROOT_PATH + RegistryConstants.REG_FOLDERS_PATH;
+                string legacyPath = RegistryConstants.REG_ROOT_PATH + RegistryConstants.REG_ROOT_PATH;
+
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(foldersPath))
                 {
-                    if (key != null)
+                    LoadImageFoldersFromKey(key, imageFolders);
+                }
+
+                // Fallback for older versions that accidentally wrote under REG_ROOT_PATH + REG_ROOT_PATH.
+                if (imageFolders.Count == 0)
+                {
+                    using (RegistryKey legacyKey = Registry.CurrentUser.OpenSubKey(legacyPath))
                     {
-                        foreach (string valueName in key.GetValueNames())
-                        {
-                            if (valueName.StartsWith("Folder"))
-                            {
-                                string value = key.GetValue(valueName) as string;
-                                if (!string.IsNullOrEmpty(value))
-                                {
-                                    string[] parts = value.Split('|');
-                                    if (parts.Length == 2)
-                                    {
-                                        string folderPath = parts[0];
-                                        bool includeSubfolders = bool.Parse(parts[1]);
-                                        imageFolders[folderPath] = includeSubfolders;
-                                    }
-                                }
-                            }
-                        }
+                        LoadImageFoldersFromKey(legacyKey, imageFolders);
+                    }
+
+                    // Migrate legacy values to the correct key path if we found any.
+                    if (imageFolders.Count > 0)
+                    {
+                        setImageFolders(imageFolders);
                     }
                 }
             }
@@ -394,6 +393,29 @@ namespace ScreenSaver
             }
 
             return imageFolders;
+        }
+
+        private static void LoadImageFoldersFromKey(RegistryKey key, SortedDictionary<string, bool> imageFolders)
+        {
+            if (key == null) { return; }
+
+            foreach (string valueName in key.GetValueNames())
+            {
+                if (!valueName.StartsWith("Folder")) { continue; }
+
+                string value = key.GetValue(valueName) as string;
+                if (string.IsNullOrEmpty(value)) { continue; }
+
+                string[] parts = value.Split('|');
+                if (parts.Length != 2) { continue; }
+
+                string folderPath = parts[0];
+                bool includeSubfolders;
+                if (bool.TryParse(parts[1], out includeSubfolders) && !string.IsNullOrWhiteSpace(folderPath))
+                {
+                    imageFolders[folderPath] = includeSubfolders;
+                }
+            }
         }
 
     }

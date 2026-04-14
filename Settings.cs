@@ -347,7 +347,7 @@ namespace ScreenSaver
                 registryManager.setRegistryProperty(RegistryConstants.REG_KEY_FILE_TYPES, selectedFileTypes.ToString());
 
                 // Save other settings
-                registryManager.setRegistryProperty(RegistryConstants.REG_KEY_SHOW_FILENAME, cbx_showFileNames.Checked.ToString());
+                registryManager.setBooleanPropertyVal(RegistryConstants.REG_KEY_SHOW_FILENAME, cbx_showFileNames.Checked);
                 registryManager.setRegistryProperty(RegistryConstants.REG_KEY_FILENAME_DISPLAY_MODE, comboBoxFileNameDisplay.SelectedIndex.ToString());
                 registryManager.setRegistryProperty(RegistryConstants.REG_KEY_FILENAME_FONT, FontToString(labelFileNameSample.Font));
                 registryManager.setRegistryProperty(RegistryConstants.REG_KEY_FILENAME_COLOR, ColorTranslator.ToHtml(labelFileNameSample.ForeColor));
@@ -430,18 +430,19 @@ namespace ScreenSaver
         public void btnPreview_Click(object sender, EventArgs e)
         {
             SaveSettings();
-
             runScreensaver(cbx_AllScreens.Checked);
         }
 
         public void runScreensaver(Boolean allScreens, Boolean destroyOnClose = false)
         {
             CloseAllFrames();
+            List<Screen> orderedScreens = new List<Screen>(Screen.AllScreens);
 
             if (allScreens)
             {
-                foreach (Screen screen in Screen.AllScreens)
+                for (int i = 0; i < orderedScreens.Count; i++)
                 {
+                    Screen screen = orderedScreens[i];
                     Form1 form = new Form1(this, screen);
                     if (destroyOnClose)
                     {
@@ -457,7 +458,8 @@ namespace ScreenSaver
             }
             else
             {
-                Form1 form = new Form1(this, Screen.PrimaryScreen);
+                Screen selectedScreen = orderedScreens.Count > 0 ? orderedScreens[0] : Screen.PrimaryScreen;
+                Form1 form = new Form1(this, selectedScreen);
                 if (destroyOnClose)
                 {
                     form.FormClosed += ScreensaverForm_FormClosed_Exit;
