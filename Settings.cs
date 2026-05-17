@@ -74,6 +74,11 @@ namespace ScreenSaver
 
             // Load all settings from registry
             LoadSettings();
+
+            dgvFoldersList.AllowDrop = true;
+            dgvFoldersList.DragEnter += DgvFoldersList_DragEnter;
+            dgvFoldersList.DragOver += DgvFoldersList_DragOver;
+            dgvFoldersList.DragDrop += DgvFoldersList_DragDrop;
         }
 
         private void Settings_FormClosing(object sender, FormClosingEventArgs e)
@@ -376,24 +381,49 @@ namespace ScreenSaver
         private void btnAddFolder_Click(object sender, EventArgs e)
         {
             if (folderBrowserDialog1.ShowDialog() == DialogResult.OK)
-            {
-                string selectedPath = folderBrowserDialog1.SelectedPath;
-                //check if this folder is already listed
-                foreach (DataGridViewRow row in dgvFoldersList.Rows)
-                {
-                    if (string.Equals(row.Cells[0].Value.ToString(), selectedPath, StringComparison.OrdinalIgnoreCase))//compare ignore case
-                    {
-                        return;
-                    }
-                }
+                TryAddFolder(folderBrowserDialog1.SelectedPath, includeSubfolders: true);
+        }
 
-                //add the selected folder to our list
-                this.dgvFoldersList.Rows.Add(new Object[] { selectedPath, true });
-                //make sure the checkboxes are active
-                foreach (DataGridViewRow row in dgvFoldersList.Rows)
-                {
-                    row.Cells[1].ReadOnly = false;
-                }
+        private bool TryAddFolder(string folderPath, bool includeSubfolders)
+        {
+            if (string.IsNullOrWhiteSpace(folderPath) || !Directory.Exists(folderPath))
+                return false;
+
+            string normalized = Path.GetFullPath(folderPath.Trim());
+
+            foreach (DataGridViewRow row in dgvFoldersList.Rows)
+            {
+                if (row.Cells[0].Value != null &&
+                    string.Equals(row.Cells[0].Value.ToString(), normalized, StringComparison.OrdinalIgnoreCase))
+                    return false;
+            }
+
+            dgvFoldersList.Rows.Add(normalized, includeSubfolders);
+            foreach (DataGridViewRow row in dgvFoldersList.Rows)
+                row.Cells[1].ReadOnly = false;
+
+            return true;
+        }
+
+        private void DgvFoldersList_DragEnter(object sender, DragEventArgs e)
+        {
+            e.Effect = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+        }
+
+        private void DgvFoldersList_DragOver(object sender, DragEventArgs e)
+        {
+            DgvFoldersList_DragEnter(sender, e);
+        }
+
+        private void DgvFoldersList_DragDrop(object sender, DragEventArgs e)
+        {
+            if (!e.Data.GetDataPresent(DataFormats.FileDrop))
+                return;
+
+            foreach (string path in (string[])e.Data.GetData(DataFormats.FileDrop))
+            {
+                if (Directory.Exists(path))
+                    TryAddFolder(path, includeSubfolders: true);
             }
         }
 
