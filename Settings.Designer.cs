@@ -19,6 +19,10 @@
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Settings));
             this.tabControl1 = new System.Windows.Forms.TabControl();
             this.ImageFolders = new System.Windows.Forms.TabPage();
+            this.cbx_UseVideo = new System.Windows.Forms.CheckBox();
+            this.cbx_VideoMute = new System.Windows.Forms.CheckBox();
+            this.comboBoxVideoDuration = new System.Windows.Forms.ComboBox();
+            this.labelVideoDuration = new System.Windows.Forms.Label();
             this.cbx_AllScreens = new System.Windows.Forms.CheckBox();
             this.btnChangeFont = new System.Windows.Forms.Button();
             this.cbx_showFileNames = new System.Windows.Forms.CheckBox();
@@ -81,11 +85,15 @@
             this.tabControl1.Location = new System.Drawing.Point(6, 7);
             this.tabControl1.Name = "tabControl1";
             this.tabControl1.SelectedIndex = 0;
-            this.tabControl1.Size = new System.Drawing.Size(577, 390);
+            this.tabControl1.Size = new System.Drawing.Size(589, 390);
             this.tabControl1.TabIndex = 0;
             // 
             // ImageFolders
             // 
+            this.ImageFolders.Controls.Add(this.cbx_UseVideo);
+            this.ImageFolders.Controls.Add(this.cbx_VideoMute);
+            this.ImageFolders.Controls.Add(this.comboBoxVideoDuration);
+            this.ImageFolders.Controls.Add(this.labelVideoDuration);
             this.ImageFolders.Controls.Add(this.cbx_AllScreens);
             this.ImageFolders.Controls.Add(this.btnChangeFont);
             this.ImageFolders.Controls.Add(this.cbx_showFileNames);
@@ -104,10 +112,58 @@
             this.ImageFolders.Location = new System.Drawing.Point(4, 22);
             this.ImageFolders.Name = "ImageFolders";
             this.ImageFolders.Padding = new System.Windows.Forms.Padding(3);
-            this.ImageFolders.Size = new System.Drawing.Size(569, 364);
+            this.ImageFolders.Size = new System.Drawing.Size(581, 364);
             this.ImageFolders.TabIndex = 0;
             this.ImageFolders.Text = "Media Files";
             this.ImageFolders.UseVisualStyleBackColor = true;
+            // 
+            // cbx_UseVideo
+            // 
+            this.cbx_UseVideo.AutoSize = true;
+            this.cbx_UseVideo.Location = new System.Drawing.Point(6, 57);
+            this.cbx_UseVideo.Name = "cbx_UseVideo";
+            this.cbx_UseVideo.Size = new System.Drawing.Size(150, 17);
+            this.cbx_UseVideo.TabIndex = 17;
+            this.cbx_UseVideo.Tag = "UseVideo";
+            this.cbx_UseVideo.Text = "Include Videos in Rotation";
+            this.cbx_UseVideo.UseVisualStyleBackColor = true;
+            this.cbx_UseVideo.CheckedChanged += new System.EventHandler(this.cbx_UseVideo_CheckedChanged);
+            // 
+            // cbx_VideoMute
+            // 
+            this.cbx_VideoMute.AutoSize = true;
+            this.cbx_VideoMute.Location = new System.Drawing.Point(159, 57);
+            this.cbx_VideoMute.Name = "cbx_VideoMute";
+            this.cbx_VideoMute.Size = new System.Drawing.Size(136, 17);
+            this.cbx_VideoMute.TabIndex = 18;
+            this.cbx_VideoMute.Tag = "VideoMute";
+            this.cbx_VideoMute.Text = "Mute Videos by Default";
+            this.cbx_VideoMute.UseVisualStyleBackColor = true;
+            // 
+            // comboBoxVideoDuration
+            // 
+            this.comboBoxVideoDuration.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.comboBoxVideoDuration.FormattingEnabled = true;
+            this.comboBoxVideoDuration.Items.AddRange(new object[] {
+            "10",
+            "20",
+            "30",
+            "40",
+            "50"});
+            this.comboBoxVideoDuration.Location = new System.Drawing.Point(120, 80);
+            this.comboBoxVideoDuration.Name = "comboBoxVideoDuration";
+            this.comboBoxVideoDuration.Size = new System.Drawing.Size(50, 21);
+            this.comboBoxVideoDuration.TabIndex = 20;
+            this.comboBoxVideoDuration.Tag = "VideoDuration";
+            // 
+            // labelVideoDuration
+            // 
+            this.labelVideoDuration.AutoSize = true;
+            this.labelVideoDuration.Location = new System.Drawing.Point(8, 83);
+            this.labelVideoDuration.Name = "labelVideoDuration";
+            this.labelVideoDuration.Size = new System.Drawing.Size(104, 13);
+            this.labelVideoDuration.TabIndex = 19;
+            this.labelVideoDuration.Text = "Video Clip Length (s)";
             // 
             // cbx_AllScreens
             // 
@@ -122,7 +178,7 @@
             // 
             // btnChangeFont
             // 
-            this.btnChangeFont.Location = new System.Drawing.Point(14, 164);
+            this.btnChangeFont.Location = new System.Drawing.Point(14, 187);
             this.btnChangeFont.Name = "btnChangeFont";
             this.btnChangeFont.Size = new System.Drawing.Size(101, 23);
             this.btnChangeFont.TabIndex = 11;
@@ -133,7 +189,7 @@
             // cbx_showFileNames
             // 
             this.cbx_showFileNames.AutoSize = true;
-            this.cbx_showFileNames.Location = new System.Drawing.Point(7, 114);
+            this.cbx_showFileNames.Location = new System.Drawing.Point(7, 137);
             this.cbx_showFileNames.Name = "cbx_showFileNames";
             this.cbx_showFileNames.Size = new System.Drawing.Size(108, 17);
             this.cbx_showFileNames.TabIndex = 0;
@@ -165,9 +221,9 @@
             // groupBox1
             // 
             this.groupBox1.Controls.Add(this.fileTypesList);
-            this.groupBox1.Location = new System.Drawing.Point(286, 10);
+            this.groupBox1.Location = new System.Drawing.Point(293, 10);
             this.groupBox1.Name = "groupBox1";
-            this.groupBox1.Size = new System.Drawing.Size(274, 104);
+            this.groupBox1.Size = new System.Drawing.Size(282, 133);
             this.groupBox1.TabIndex = 6;
             this.groupBox1.TabStop = false;
             this.groupBox1.Text = "File Types";
@@ -181,7 +237,7 @@
             this.fileTypesList.HideSelection = false;
             this.fileTypesList.Location = new System.Drawing.Point(6, 15);
             this.fileTypesList.Name = "fileTypesList";
-            this.fileTypesList.Size = new System.Drawing.Size(262, 79);
+            this.fileTypesList.Size = new System.Drawing.Size(269, 112);
             this.fileTypesList.TabIndex = 5;
             this.fileTypesList.Tag = "FileTypes";
             this.fileTypesList.UseCompatibleStateImageBehavior = false;
@@ -190,7 +246,7 @@
             // label2
             // 
             this.label2.AutoSize = true;
-            this.label2.Location = new System.Drawing.Point(11, 86);
+            this.label2.Location = new System.Drawing.Point(11, 109);
             this.label2.Name = "label2";
             this.label2.Size = new System.Drawing.Size(167, 13);
             this.label2.TabIndex = 5;
@@ -198,7 +254,7 @@
             // 
             // numericUpDown1
             // 
-            this.numericUpDown1.Location = new System.Drawing.Point(186, 84);
+            this.numericUpDown1.Location = new System.Drawing.Point(186, 107);
             this.numericUpDown1.Minimum = new decimal(new int[] {
             5,
             0,
@@ -217,12 +273,11 @@
             // comboBox1
             // 
             this.comboBox1.FormattingEnabled = true;
-            this.comboBox1.Location = new System.Drawing.Point(109, 57);
+            this.comboBox1.Location = new System.Drawing.Point(420, 57);
             this.comboBox1.Name = "comboBox1";
             this.comboBox1.Size = new System.Drawing.Size(42, 21);
             this.comboBox1.TabIndex = 4;
             this.comboBox1.Tag = "FramesOnScreen";
-            this.comboBox1.Visible = false;
             // 
             // chkRandomOrder
             // 
@@ -273,27 +328,26 @@
             // label1
             // 
             this.label1.AutoSize = true;
-            this.label1.Location = new System.Drawing.Point(8, 60);
+            this.label1.Location = new System.Drawing.Point(319, 60);
             this.label1.Name = "label1";
             this.label1.Size = new System.Drawing.Size(95, 13);
             this.label1.TabIndex = 3;
             this.label1.Text = "Frames Per screen";
-            this.label1.Visible = false;
             // 
             // comboBoxFileNameDisplay
             // 
             this.comboBoxFileNameDisplay.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
-            this.comboBoxFileNameDisplay.Location = new System.Drawing.Point(120, 137);
+            this.comboBoxFileNameDisplay.Location = new System.Drawing.Point(120, 160);
             this.comboBoxFileNameDisplay.Name = "comboBoxFileNameDisplay";
             this.comboBoxFileNameDisplay.Size = new System.Drawing.Size(150, 21);
             this.comboBoxFileNameDisplay.TabIndex = 16;
-            this.comboBoxFileNameDisplay.Tag = RegistryConstants.REG_KEY_FILENAME_DISPLAY_MODE;
+            this.comboBoxFileNameDisplay.Tag = "FileNameDisplayMode";
             this.comboBoxFileNameDisplay.SelectedIndexChanged += new System.EventHandler(this.comboBoxFileNameDisplay_SelectedIndexChanged);
             // 
             // labelFileNameSample
             // 
             this.labelFileNameSample.AutoSize = true;
-            this.labelFileNameSample.Location = new System.Drawing.Point(121, 169);
+            this.labelFileNameSample.Location = new System.Drawing.Point(121, 192);
             this.labelFileNameSample.Name = "labelFileNameSample";
             this.labelFileNameSample.Size = new System.Drawing.Size(92, 13);
             this.labelFileNameSample.TabIndex = 28;
@@ -302,7 +356,7 @@
             // labelFileNameDisplay
             // 
             this.labelFileNameDisplay.AutoSize = true;
-            this.labelFileNameDisplay.Location = new System.Drawing.Point(6, 140);
+            this.labelFileNameDisplay.Location = new System.Drawing.Point(6, 163);
             this.labelFileNameDisplay.Name = "labelFileNameDisplay";
             this.labelFileNameDisplay.Size = new System.Drawing.Size(94, 13);
             this.labelFileNameDisplay.TabIndex = 15;
@@ -519,7 +573,7 @@
             this.toolStripStatusLabel});
             this.toolStrip1.Location = new System.Drawing.Point(0, 438);
             this.toolStrip1.Name = "toolStrip1";
-            this.toolStrip1.Size = new System.Drawing.Size(586, 25);
+            this.toolStrip1.Size = new System.Drawing.Size(603, 25);
             this.toolStrip1.TabIndex = 4;
             this.toolStrip1.Text = "toolStrip1";
             // 
@@ -540,6 +594,7 @@
             this.cbx_debug.Name = "cbx_debug";
             this.cbx_debug.Size = new System.Drawing.Size(58, 17);
             this.cbx_debug.TabIndex = 5;
+            this.cbx_debug.Tag = "Debug";
             this.cbx_debug.Text = "Debug";
             this.toolTip1.SetToolTip(this.cbx_debug, "Save debug info to log in user temp folder");
             this.cbx_debug.UseVisualStyleBackColor = true;
@@ -548,7 +603,7 @@
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(586, 463);
+            this.ClientSize = new System.Drawing.Size(603, 463);
             this.Controls.Add(this.cbx_debug);
             this.Controls.Add(this.toolStrip1);
             this.Controls.Add(this.btnPreview);
@@ -612,6 +667,10 @@
         private System.Windows.Forms.Button btnChangeFont;
         private System.Windows.Forms.FontDialog fontDialog1;
         private System.Windows.Forms.CheckBox cbx_AllScreens;
+        private System.Windows.Forms.CheckBox cbx_UseVideo;
+        private System.Windows.Forms.CheckBox cbx_VideoMute;
+        private System.Windows.Forms.ComboBox comboBoxVideoDuration;
+        private System.Windows.Forms.Label labelVideoDuration;
         private System.Windows.Forms.Label label4;
         private System.Windows.Forms.ComboBox comboBoxFileNameDisplay;
         private System.Windows.Forms.Label labelFileNameSample;

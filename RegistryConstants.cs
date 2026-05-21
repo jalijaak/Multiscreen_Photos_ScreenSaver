@@ -18,6 +18,11 @@ namespace ScreenSaver
         public const string REG_KEY_USE_EFFECTS = "Use Effects";
 
         public const string REG_KEY_VideoDuration = "VideoDuration";
+        public const string REG_KEY_USE_VIDEO = "UseVideo";
+        public const string REG_KEY_VIDEO_MUTE = "VideoMute";
+        public const string REG_KEY_VIDEO_FILE_TYPES = "VideoFileTypes";
+
+        public const string DefaultVideoFileTypes = "*.mp4;*.avi;*.wmv;*.mov";
 
         // Registry root paths
         public const string REG_ROOT_PATH = "SOFTWARE\\MyScreenSaverTest";

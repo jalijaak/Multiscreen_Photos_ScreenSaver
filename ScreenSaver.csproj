@@ -105,6 +105,12 @@
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="EnumerableExtension.cs" />
+    <Compile Include="FrameLayout.cs" />
+    <Compile Include="FrameMediaHistory.cs" />
+    <Compile Include="MediaCatalog.cs" />
+    <Compile Include="MediaFrameSlot.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Include="Form1.cs">
       <SubType>Form</SubType>
     </Compile>

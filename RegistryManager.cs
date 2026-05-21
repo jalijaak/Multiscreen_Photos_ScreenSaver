@@ -48,6 +48,16 @@ namespace ScreenSaver
             // Display properties
             RegistryPropertiesList.Add(new RegistryVal(RegistryConstants.REG_KEY_FRAMES_ON_SCREEN, RegistryVal.propertyType.Free, null,
                 new List<string> { "1", "4", "9", "13" }, "1", RegistryConstants.REG_KEY_FRAMES_ON_SCREEN));
+
+            RegistryPropertiesList.Add(new RegistryVal(RegistryConstants.REG_KEY_USE_VIDEO, RegistryVal.propertyType.Free, null,
+                new List<string> { "Yes", "No" }, "No", RegistryConstants.REG_KEY_USE_VIDEO));
+            RegistryPropertiesList.Add(new RegistryVal(RegistryConstants.REG_KEY_VIDEO_MUTE, RegistryVal.propertyType.Free, null,
+                new List<string> { "Yes", "No" }, "Yes", RegistryConstants.REG_KEY_VIDEO_MUTE));
+            RegistryPropertiesList.Add(new RegistryVal(RegistryConstants.REG_KEY_VideoDuration, RegistryVal.propertyType.Free, null,
+                new List<string> { "0", "1", "2", "3", "4" }, "2", RegistryConstants.REG_KEY_VideoDuration));
+            RegistryPropertiesList.Add(new RegistryVal(RegistryConstants.REG_KEY_VIDEO_FILE_TYPES, RegistryVal.propertyType.Free, null,
+                new List<string> { "*.mp4", "*.avi", "*.wmv", "*.mov" },
+                RegistryConstants.DefaultVideoFileTypes, RegistryConstants.REG_KEY_VIDEO_FILE_TYPES));
             RegistryPropertiesList.Add(new RegistryVal(RegistryConstants.REG_KEY_USE_MULTIPLE_SCREENS, RegistryVal.propertyType.Free, null,
                 new List<string> { "Yes", "No" }, "No", RegistryConstants.REG_KEY_USE_MULTIPLE_SCREENS));
 
@@ -103,7 +113,7 @@ namespace ScreenSaver
                 System.Diagnostics.Debug.WriteLine($"Current value in RegistryProperties: {registryVal.PropertyValue}");
                 System.Diagnostics.Debug.WriteLine($"Value from registry: {obj}");
 
-                if (obj != null && obj is String)
+                if (obj != null)
                 {
                     registryVal.PropertyValue = obj.ToString();
                     System.Diagnostics.Debug.WriteLine($"Updated value: {registryVal.PropertyValue}");
@@ -143,32 +153,54 @@ namespace ScreenSaver
             return defaultValue;
         }
 
-        internal Boolean getBooleanPropertyVal(string propertyName, Boolean defaultValue = true)
+        internal Boolean getBooleanPropertyVal(string propertyName, Boolean defaultValue = false)
         {
             try
             {
-                System.Diagnostics.Debug.WriteLine($"Getting boolean property: {propertyName}");
-
-                // If property doesn't exist, add it with default value
                 if (!RegistryProperties.ContainsKey(propertyName))
                 {
-                    System.Diagnostics.Debug.WriteLine($"Property {propertyName} not found in RegistryProperties, adding it");
-                    var newProp = new RegistryVal(propertyName, RegistryVal.propertyType.Free, null,
-                        new List<string> { "Yes", "No" }, "No", propertyName);
+                    var newProp = CreateNewRegistryProperty(propertyName, true);
                     RegistryProperties.Add(propertyName, newProp);
-                    return defaultValue;
+                    string value = newProp.PropertyValue;
+                    if (string.IsNullOrEmpty(value))
+                        return defaultValue;
+                    return value.Equals("Yes", StringComparison.OrdinalIgnoreCase);
                 }
 
                 RegistryVal regObj = RegistryProperties[propertyName];
-                if (regObj == null) { return defaultValue; }
-                return regObj.PropertyValue.Equals(regObj.DefaultVal);
+                if (regObj == null || string.IsNullOrEmpty(regObj.PropertyValue))
+                    return defaultValue;
+
+                return ParseYesNo(regObj.PropertyValue, defaultValue);
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Error in getBooleanPropertyVal for {propertyName}: {ex.Message}");
-                System.Diagnostics.Debug.WriteLine($"Stack trace: {ex.StackTrace}");
-                return defaultValue; // Return defaultValue on error
+                return defaultValue;
             }
+        }
+
+        internal static bool ParseYesNo(string value, bool defaultValue = false)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return defaultValue;
+
+            value = value.Trim();
+            if (value.Equals("Yes", StringComparison.OrdinalIgnoreCase)
+                || value.Equals("True", StringComparison.OrdinalIgnoreCase)
+                || value == "1")
+            {
+                return true;
+            }
+
+            if (value.Equals("No", StringComparison.OrdinalIgnoreCase)
+                || value.Equals("False", StringComparison.OrdinalIgnoreCase)
+                || value == "0")
+            {
+                return false;
+            }
+
+            return defaultValue;
         }
 
         private RegistryVal CreateNewRegistryProperty(string propertyName, bool isBoolean = false)
@@ -213,40 +245,7 @@ namespace ScreenSaver
 
         internal void setBooleanPropertyVal(string propertyName, Boolean val)
         {
-            try
-            {
-                System.Diagnostics.Debug.WriteLine($"Setting boolean property: {propertyName} to value: {val}");
-
-                // If property doesn't exist, add it
-                if (!RegistryProperties.ContainsKey(propertyName))
-                {
-                    System.Diagnostics.Debug.WriteLine($"Property {propertyName} not found in RegistryProperties, adding it");
-                    var newProp = CreateNewRegistryProperty(propertyName, true);
-                    RegistryProperties.Add(propertyName, newProp);
-                }
-
-                RegistryVal regObj = RegistryProperties[propertyName];
-                if (regObj == null) { return; }
-
-                if (getBooleanPropertyVal(propertyName) != val)
-                {
-                    //find the required option
-                    foreach (String opt in regObj.PropertyOptions)
-                    {
-                        Boolean t1 = opt.Equals(regObj.DefaultVal);
-                        if (!(t1 ^ val))
-                        {
-                            setRegistryProperty(propertyName, opt);
-                            return;
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Error in setBooleanPropertyVal for {propertyName}: {ex.Message}");
-                System.Diagnostics.Debug.WriteLine($"Stack trace: {ex.StackTrace}");
-            }
+            setRegistryProperty(propertyName, val ? "Yes" : "No");
         }
 
         internal void setRegistryProperty(string propertyName, String newVal)
@@ -324,6 +323,24 @@ namespace ScreenSaver
             RegistryVal regObj = RegistryProperties[propertyName];
             if (regObj == null) { return new List<String> { "" }; }
             return regObj.PropertyOptions;
+        }
+
+        internal bool IsUseVideoEnabled()
+        {
+            return getRegistryProperty(RegistryConstants.REG_KEY_USE_VIDEO, "No") == "Yes";
+        }
+
+        internal bool IsVideoMuted()
+        {
+            return getRegistryProperty(RegistryConstants.REG_KEY_VIDEO_MUTE, "Yes") == "Yes";
+        }
+
+        internal void EnforceSingleVideoFrame()
+        {
+            if (getRegistryProperty(RegistryConstants.REG_KEY_FRAMES_ON_SCREEN, "1") != "1")
+            {
+                setRegistryProperty(RegistryConstants.REG_KEY_FRAMES_ON_SCREEN, "1");
+            }
         }
 
         internal void setImageFolders(SortedDictionary<string, bool> imageFolders)

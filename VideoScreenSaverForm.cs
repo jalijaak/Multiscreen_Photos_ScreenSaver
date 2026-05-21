@@ -1,230 +1,276 @@
 using System;
 using System.Drawing;
 using System.Windows.Forms;
-using WMPLib;
 using System.IO;
 using System.Collections.Generic;
 using Microsoft.Win32;
-using static System.Net.Mime.MediaTypeNames;
-using System.Windows.Forms.VisualStyles;
-using System.Linq;
 
 namespace ScreenSaver
 {
-    public class VideoScreenSaverForm : ScreenSaverForm
+    public class VideoScreenSaverForm : Form
     {
-        private RegistryManager registryManager;
+        private readonly RegistryManager registryManager;
+        private readonly Settings parent;
+        private readonly Screen screen;
+        private readonly string initialVideoPath;
 
         private AxWMPLib.AxWindowsMediaPlayer mediaPlayer;
         private List<string> videoFiles;
-        private int currentVideoIndex;
         private int videoDurationSeconds;
         private DateTime videoStartTime;
         private Timer durationTimer;
         private Label fileNameLabel;
         private Font fileNameFont;
         private int fileNameDisplayMode;
-        private string initialVideoPath;
-        private SortedDictionary<string, bool> imageFolders = new SortedDictionary<string, bool>();
+        private bool isPreviewMode;
+        private bool videoMuted = true;
+        private Point mouseXY = Point.Empty;
 
-        public VideoScreenSaverForm(int screenNumber, string videoPath) : base(screenNumber)
+        public VideoScreenSaverForm(Settings parent, Screen screen, string videoPath = null, bool isPreview = false)
         {
+            this.parent = parent;
+            this.screen = screen;
             this.initialVideoPath = videoPath;
+            this.isPreviewMode = isPreview;
+
+            registryManager = new RegistryManager();
             InitializeComponent();
             LoadSettings();
             LoadVideoFiles();
             InitializeTimers();
-            PlayNextVideo();
+            PlayCurrentVideo();
         }
 
         private void InitializeComponent()
         {
-            this.registryManager = new RegistryManager();
-
-            // Initialize Windows Media Player
             mediaPlayer = new AxWMPLib.AxWindowsMediaPlayer();
             ((System.ComponentModel.ISupportInitialize)(mediaPlayer)).BeginInit();
-            
-            // Configure basic properties that can be set before initialization
+
             mediaPlayer.Dock = DockStyle.Fill;
             mediaPlayer.PlayStateChange += MediaPlayer_PlayStateChange;
             mediaPlayer.Enabled = true;
-            
-            // Add media player to controls
             Controls.Add(mediaPlayer);
-            
-            // Initialize file name label
+
             fileNameLabel = new Label();
             fileNameLabel.AutoSize = true;
             fileNameLabel.BackColor = Color.Transparent;
             fileNameLabel.Visible = false;
             Controls.Add(fileNameLabel);
-            
+
             ((System.ComponentModel.ISupportInitialize)(mediaPlayer)).EndInit();
 
-            // Configure properties that must be set after initialization
             mediaPlayer.enableContextMenu = false;
             mediaPlayer.uiMode = "none";
-            mediaPlayer.settings.mute = true; // Mute the video
+
+            FormBorderStyle = FormBorderStyle.None;
+            Top = screen.Bounds.Top;
+            Left = screen.Bounds.Left;
+            ClientSize = new Size(screen.Bounds.Width, screen.Bounds.Height);
+            ShowInTaskbar = false;
+            TopMost = true;
+            BackColor = Color.Black;
+
+            if (!isPreviewMode)
+            {
+                KeyDown += VideoScreenSaverForm_KeyDown;
+                MouseDown += OnMouseEvent;
+                MouseMove += OnMouseEvent;
+            }
+
+            Shown += VideoScreenSaverForm_Shown;
+        }
+
+        private void VideoScreenSaverForm_Shown(object sender, EventArgs e)
+        {
+            if (isPreviewMode) { return; }
+
+            try
+            {
+                Screen actualScreen = Screen.FromHandle(Handle);
+                if (screen == null || !screen.DeviceName.Equals(actualScreen.DeviceName, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Keep assigned screen when possible; otherwise align to actual monitor.
+                }
+                Bounds = screen.Bounds;
+            }
+            catch
+            {
+                Bounds = screen.Bounds;
+            }
         }
 
         private void LoadSettings()
         {
-            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RegistryConstants.REG_ROOT_PATH))
+            videoMuted = registryManager.IsVideoMuted();
+
+            int durationIndex;
+            if (!int.TryParse(registryManager.getRegistryProperty(RegistryConstants.REG_KEY_VideoDuration, "2"), out durationIndex))
             {
-                if (key != null)
-                {
-                    // Load video duration setting
-                    int durationIndex = int.Parse((string)key.GetValue(RegistryConstants.REG_KEY_VideoDuration, "2"));
-                    videoDurationSeconds = (durationIndex + 1) * 10; // Convert index to seconds (10, 20, 30, 40, 50)
-                    
-                    // Load file name display settings
-                    bool showFileName = bool.Parse((string)key.GetValue(RegistryConstants.REG_KEY_SHOW_FILENAME, "False"));
-                    fileNameDisplayMode = int.Parse((string)key.GetValue(RegistryConstants.REG_KEY_FILENAME_DISPLAY_MODE, "2"));
-                    string fontString = (string)key.GetValue(RegistryConstants.REG_KEY_FILENAME_FONT, "");
-                    string colorString = (string)key.GetValue(RegistryConstants.REG_KEY_FILENAME_COLOR, "White");
-                    
-                    fileNameLabel.Visible = showFileName;
-                    if (!string.IsNullOrEmpty(fontString))
-                    {
-                        fileNameFont = StringToFont(fontString);
-                        fileNameLabel.Font = fileNameFont;
-                    }
-                    fileNameLabel.ForeColor = ColorTranslator.FromHtml(colorString);
-                }
+                durationIndex = 2;
             }
+            videoDurationSeconds = (durationIndex + 1) * 10;
+
+            bool showFileName = registryManager.getRegistryProperty(RegistryConstants.REG_KEY_SHOW_FILENAME, "No") == "Yes";
+            if (!int.TryParse(registryManager.getRegistryProperty(RegistryConstants.REG_KEY_FILENAME_DISPLAY_MODE, "2"), out fileNameDisplayMode))
+            {
+                fileNameDisplayMode = 2;
+            }
+
+            string fontString = registryManager.getRegistryProperty(RegistryConstants.REG_KEY_FILENAME_FONT, "");
+            string colorString = registryManager.getRegistryProperty(RegistryConstants.REG_KEY_FILENAME_COLOR, "White");
+
+            fileNameLabel.Visible = showFileName;
+            if (!string.IsNullOrEmpty(fontString))
+            {
+                fileNameFont = StringToFont(fontString);
+                fileNameLabel.Font = fileNameFont;
+            }
+            fileNameLabel.ForeColor = ColorTranslator.FromHtml(colorString);
         }
 
         private void LoadVideoFiles()
         {
             videoFiles = new List<string>();
             HashSet<string> uniqueVideos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            
-            // If we have an initial video path, use only that
+
             if (!string.IsNullOrEmpty(initialVideoPath))
             {
                 videoFiles.Add(initialVideoPath);
                 return;
             }
 
-            // Otherwise load from registry settings
-            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RegistryConstants.REG_ROOT_PATH))
+            SortedDictionary<string, bool> imageFolders = registryManager.getImageFolders();
+            string fileTypes = registryManager.getRegistryProperty(
+                RegistryConstants.REG_KEY_VIDEO_FILE_TYPES,
+                RegistryConstants.DefaultVideoFileTypes);
+            if (string.IsNullOrEmpty(fileTypes))
             {
-                if (key != null)
-                {
-                    imageFolders = registryManager.getImageFolders();
-                    if (imageFolders.Count > 0)
-                    {
-                        foreach (KeyValuePair<string, bool> folderEntry in imageFolders)
-                        {
-                            string folder = folderEntry.Key;
-                            bool includeSubfolders = folderEntry.Value;
+                fileTypes = RegistryConstants.DefaultVideoFileTypes;
+            }
+            string[] supportedExtensions = fileTypes.Split(';');
 
-                            if (Directory.Exists(folder))
-                            {
-                                string[] supportedExtensions = "*.mp4;*.avi;*.wmv;*.mov".Split(';');
-                                try
-                                {
-                                    foreach (string extension in supportedExtensions)
-                                    {
-                                        SearchOption searchOption = includeSubfolders ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
-                                        foreach (string videoPath in Directory.EnumerateFiles(folder, extension, searchOption))
-                                        {
-                                            uniqueVideos.Add(videoPath);
-                                        }
-                                    }
-                                }
-                                catch (UnauthorizedAccessException ex)
-                                {
-                                    Logger.WriteDebugLog($"Error accessing folder {folder}: {ex.Message}");
-                                    Console.WriteLine($"Error accessing folder {folder}: {ex.Message}");
-                                }
-                                catch (DirectoryNotFoundException ex)
-                                {
-                                    Logger.WriteDebugLog($"Error accessing folder {folder}: {ex.Message}");
-                                    Console.WriteLine($"Error accessing folder {folder}: {ex.Message}");
-                                }
-                            }
+            foreach (KeyValuePair<string, bool> folderEntry in imageFolders)
+            {
+                string folder = folderEntry.Key;
+                bool includeSubfolders = folderEntry.Value;
+
+                if (!Directory.Exists(folder)) { continue; }
+
+                try
+                {
+                    foreach (string extension in supportedExtensions)
+                    {
+                        if (string.IsNullOrWhiteSpace(extension)) { continue; }
+
+                        SearchOption searchOption = includeSubfolders
+                            ? SearchOption.AllDirectories
+                            : SearchOption.TopDirectoryOnly;
+                        foreach (string videoPath in Directory.EnumerateFiles(folder, extension.Trim(), searchOption))
+                        {
+                            uniqueVideos.Add(videoPath);
                         }
                     }
                 }
-            }
-
-            videoFiles = uniqueVideos.ToList();
-
-            if (videoFiles.Count > 0)
-            {
-                // Randomize video order
-                Random rnd = new Random();
-                int n = videoFiles.Count;
-                while (n > 1)
+                catch (UnauthorizedAccessException ex)
                 {
-                    n--;
-                    int k = rnd.Next(n + 1);
-                    string temp = videoFiles[k];
-                    videoFiles[k] = videoFiles[n];
-                    videoFiles[n] = temp;
+                    Logger.WriteDebugLog($"Error accessing folder {folder}: {ex.Message}");
+                }
+                catch (DirectoryNotFoundException ex)
+                {
+                    Logger.WriteDebugLog($"Error accessing folder {folder}: {ex.Message}");
                 }
             }
-            else
+
+            videoFiles = new List<string>(uniqueVideos);
+
+            if (videoFiles.Count == 0)
             {
-                MessageBox.Show("No video files found in the specified folders.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                System.Windows.Forms.Application.Exit();
+                if (parent != null)
+                {
+                    MessageBox.Show("No video files found in the specified folders.", "Error",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                Close();
             }
         }
 
         private void InitializeTimers()
         {
             durationTimer = new Timer();
-            durationTimer.Interval = 1000; // Check every second
+            durationTimer.Interval = 1000;
             durationTimer.Tick += DurationTimer_Tick;
             durationTimer.Start();
         }
 
-        private void PlayNextVideo()
+        private void PlayCurrentVideo()
         {
-            if (videoFiles.Count == 0) return;
+            if (videoFiles == null || videoFiles.Count == 0) { return; }
 
-            // Always play the first video
+            // Single video frame: always use the first (and only) entry in the playlist.
             string videoPath = videoFiles[0];
 
             if (File.Exists(videoPath))
             {
                 mediaPlayer.URL = videoPath;
                 mediaPlayer.Ctlcontrols.play();
+                ApplyMuteSettings();
                 videoStartTime = DateTime.Now;
                 UpdateFileNameLabel(videoPath);
             }
             else
             {
-                MessageBox.Show("Video file not found.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                this.Close();
+                if (parent != null)
+                {
+                    MessageBox.Show("Video file not found.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                Close();
             }
+        }
+
+        private void RestartCurrentVideo()
+        {
+            videoStartTime = DateTime.Now;
+            if (mediaPlayer != null)
+            {
+                mediaPlayer.Ctlcontrols.stop();
+                mediaPlayer.Ctlcontrols.play();
+                ApplyMuteSettings();
+            }
+        }
+
+        private void ApplyMuteSettings()
+        {
+            if (mediaPlayer?.settings == null) { return; }
+
+            mediaPlayer.settings.mute = videoMuted;
+            mediaPlayer.settings.volume = videoMuted ? 0 : 100;
         }
 
         private void UpdateFileNameLabel(string videoPath)
         {
-            if (!fileNameLabel.Visible) return;
+            if (!fileNameLabel.Visible) { return; }
 
             fileNameLabel.Text = GetFormattedFileName(videoPath);
-            fileNameLabel.Location = new Point(10, this.Height - fileNameLabel.Height - 10);
+            fileNameLabel.Location = new Point(10, Height - fileNameLabel.Height - 10);
         }
 
         private string GetFormattedFileName(string fullPath)
         {
             switch (fileNameDisplayMode)
             {
-                case 0: // Full path
+                case 0:
                     return fullPath;
-                case 1: // Relative path
-                    try {
-                        string rootPath = Path.GetDirectoryName(System.Windows.Forms.Application.ExecutablePath);
+                case 1:
+                    try
+                    {
+                        string rootPath = Path.GetDirectoryName(Application.ExecutablePath);
                         return GetRelativePath(rootPath, fullPath);
                     }
-                    catch {
+                    catch
+                    {
                         return Path.GetFileName(fullPath);
                     }
-                case 2: // File name only
+                case 2:
                 default:
                     return Path.GetFileName(fullPath);
             }
@@ -232,14 +278,14 @@ namespace ScreenSaver
 
         private string GetRelativePath(string rootPath, string fullPath)
         {
-            if (string.IsNullOrEmpty(rootPath)) return fullPath;
-            
+            if (string.IsNullOrEmpty(rootPath)) { return fullPath; }
+
             rootPath = rootPath.Replace('\\', '/').TrimEnd('/');
             fullPath = fullPath.Replace('\\', '/');
-            
+
             if (!fullPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
                 return fullPath;
-                
+
             string relativePath = fullPath.Substring(rootPath.Length).TrimStart('/');
             return string.IsNullOrEmpty(relativePath) ? "." : relativePath;
         }
@@ -269,25 +315,80 @@ namespace ScreenSaver
 
         private void DurationTimer_Tick(object sender, EventArgs e)
         {
-            if (videoStartTime != DateTime.MinValue)
+            if (videoStartTime == DateTime.MinValue) { return; }
+
+            TimeSpan elapsed = DateTime.Now - videoStartTime;
+            if (elapsed.TotalSeconds >= videoDurationSeconds)
             {
-                TimeSpan elapsed = DateTime.Now - videoStartTime;
-                if (elapsed.TotalSeconds >= videoDurationSeconds)
-                {
-                    // Close form when duration limit is reached
-                    this.Close();
-                }
+                RestartCurrentVideo();
             }
         }
 
         private void MediaPlayer_PlayStateChange(object sender, AxWMPLib._WMPOCXEvents_PlayStateChangeEvent e)
         {
-            // State 8 means media ended
-            if (e.newState == 8)
+            // State 3 = playing — WMP resets mute/volume when media opens.
+            if (e.newState == 3)
             {
-                // Close the form when video ends
-                this.Close();
+                ApplyMuteSettings();
             }
+            // State 8 = media ended — loop the single video frame.
+            else if (e.newState == 8)
+            {
+                RestartCurrentVideo();
+            }
+        }
+
+        private void OnMouseEvent(object sender, MouseEventArgs e)
+        {
+            if (!mouseXY.IsEmpty)
+            {
+                if (Math.Abs(mouseXY.X - e.X) > 5 || Math.Abs(mouseXY.Y - e.Y) > 5)
+                    ExitScreenSaver();
+                if (e.Clicks > 0)
+                    ExitScreenSaver();
+            }
+            mouseXY = new Point(e.X, e.Y);
+        }
+
+        private void VideoScreenSaverForm_KeyDown(object sender, KeyEventArgs e)
+        {
+            ExitScreenSaver();
+        }
+
+        private void ExitScreenSaver()
+        {
+            if (mediaPlayer != null)
+            {
+                mediaPlayer.Ctlcontrols.stop();
+            }
+            if (durationTimer != null)
+            {
+                durationTimer.Stop();
+            }
+
+            if (isPreviewMode)
+            {
+                Close();
+                Application.Exit();
+            }
+            else if (parent != null)
+            {
+                Close();
+            }
+            else
+            {
+                Application.Exit();
+            }
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == Keys.Escape)
+            {
+                ExitScreenSaver();
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
         }
 
         protected override void Dispose(bool disposing)
@@ -310,26 +411,5 @@ namespace ScreenSaver
             }
             base.Dispose(disposing);
         }
-
-        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
-        {
-            if (keyData == Keys.Escape)
-            {
-                // Stop playback
-                if (mediaPlayer != null)
-                {
-                    mediaPlayer.Ctlcontrols.stop();
-                }
-                // Stop timer
-                if (durationTimer != null)
-                {
-                    durationTimer.Stop();
-                }
-                // Close the form
-                this.Close();
-                return true;
-            }
-            return base.ProcessCmdKey(ref msg, keyData);
-        }
     }
-} 
+}

@@ -13,7 +13,7 @@ namespace ScreenSaver
     public partial class Settings : Form
     {
         private static RegistryManager registryManager;
-        private List<Form1> previewForms;
+        private List<Form> previewForms;
 
         public bool UseTransitions
         {
@@ -102,7 +102,10 @@ namespace ScreenSaver
         private void InitializeFileTypesList()
         {
             fileTypesList.Items.Clear();
-            string[] fileTypes = new string[] { "*.jpg", "*.jpeg", "*.png", "*.gif", "*.bmp", "*.tif", "*.tiff" };
+            string[] fileTypes = new string[] {
+                "*.jpg", "*.jpeg", "*.png", "*.gif", "*.bmp", "*.tif", "*.tiff",
+                "*.mp4", "*.avi", "*.wmv", "*.mov"
+            };
 
             foreach (string fileType in fileTypes)
             {
@@ -119,8 +122,9 @@ namespace ScreenSaver
         {
             try
             {
-                // Load debug setting
-                cbx_debug.Checked = registryManager.getBooleanPropertyVal(RegistryConstants.REG_KEY_DEBUG, false);
+                // Load debug setting (checkbox is on main form, not inside tabs)
+                cbx_debug.Checked = RegistryManager.ParseYesNo(
+                    registryManager.getRegistryProperty(RegistryConstants.REG_KEY_DEBUG, "No"), false);
 
                 // Load all tagged controls
                 foreach (Control c in this.Controls)
@@ -146,6 +150,8 @@ namespace ScreenSaver
 
                 UpdateFileNameSamplePreviewBackground();
 
+                LoadVideoSettings();
+
                 // Update UI visibility based on loaded settings
                 UpdateUIVisibility();
             }
@@ -154,6 +160,69 @@ namespace ScreenSaver
                 toolStripStatusLabel.Text = "Error loading settings: " + ex.Message;
                 toolStripStatusLabel.ForeColor = Color.Red;
             }
+        }
+
+        private void SaveControlSettings(Control parentCtrl)
+        {
+            foreach (Control cn in parentCtrl.Controls)
+            {
+                SaveControlSettings(cn);
+
+                if (cn.Tag == null) continue;
+
+                try
+                {
+                    string tag = cn.Tag.ToString();
+
+                    switch (cn)
+                    {
+                        case CheckBox chkBx:
+                            registryManager.setBooleanPropertyVal(tag, chkBx.Checked);
+                            break;
+
+                        case NumericUpDown nud:
+                            registryManager.setRegistryProperty(tag, nud.Value.ToString());
+                            break;
+
+                        case ComboBox cb:
+                            if (tag.Equals(RegistryConstants.REG_KEY_FILENAME_DISPLAY_MODE)
+                                || tag.Equals(RegistryConstants.REG_KEY_VideoDuration))
+                            {
+                                registryManager.setRegistryProperty(tag, cb.SelectedIndex.ToString());
+                            }
+                            else if (cb.SelectedItem != null)
+                            {
+                                registryManager.setRegistryProperty(tag, cb.SelectedItem.ToString());
+                            }
+                            break;
+
+                        case ListView lv:
+                            if (!lv.Tag.Equals("FileTypes"))
+                                SaveListViewSettings(lv);
+                            break;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Error saving control {cn.Name}: {ex.Message}");
+                }
+            }
+        }
+
+        private void SaveListViewSettings(ListView lv)
+        {
+            if (lv.Tag == null) return;
+
+            StringBuilder selected = new StringBuilder();
+            foreach (ListViewItem item in lv.Items)
+            {
+                if (!item.Checked) continue;
+
+                if (selected.Length > 0)
+                    selected.Append(";");
+                selected.Append(item.Name);
+            }
+            registryManager.setRegistryProperty(lv.Tag.ToString(), selected.ToString());
         }
 
         private void LoadControlSettings(Control parentCtrl)
@@ -181,13 +250,18 @@ namespace ScreenSaver
                             break;
 
                         case ComboBox cb:
-                            if(cb.Tag.ToString().Equals(RegistryConstants.REG_KEY_FILENAME_DISPLAY_MODE))
+                            if (cb.Tag.ToString().Equals(RegistryConstants.REG_KEY_FILENAME_DISPLAY_MODE))
                             {
                                 cb.SelectedIndex = Convert.ToInt32(registryManager.getRegistryProperty(cb.Tag.ToString()));
                             }
+                            else if (cb.Tag.ToString().Equals(RegistryConstants.REG_KEY_VideoDuration))
+                            {
+                                // Loaded in LoadVideoSettings
+                            }
                             else
                             {
-                                cb.Items.AddRange(registryManager.getRegistryPropertyOptions(cb.Tag.ToString()).ToArray());
+                                if (cb.Items.Count == 0)
+                                    cb.Items.AddRange(registryManager.getRegistryPropertyOptions(cb.Tag.ToString()).ToArray());
                                 cb.SelectedItem = registryManager.getRegistryProperty(cb.Tag.ToString());
                             }
                             break;
@@ -286,9 +360,14 @@ namespace ScreenSaver
         private void LoadFileTypeSelections()
         {
             string fileTypes = registryManager.getRegistryProperty(RegistryConstants.REG_KEY_FILE_TYPES);
-            if (!string.IsNullOrEmpty(fileTypes))
+            string videoFileTypes = registryManager.getRegistryProperty(
+                RegistryConstants.REG_KEY_VIDEO_FILE_TYPES,
+                RegistryConstants.DefaultVideoFileTypes);
+            string combinedTypes = string.IsNullOrEmpty(fileTypes) ? videoFileTypes : fileTypes + ";" + videoFileTypes;
+
+            if (!string.IsNullOrEmpty(combinedTypes))
             {
-                string[] selectedTypes = fileTypes.Split(';');
+                string[] selectedTypes = combinedTypes.Split(';');
                 foreach (ListViewItem item in fileTypesList.Items)
                 {
                     item.Checked = Array.IndexOf(selectedTypes, item.Name) >= 0;
@@ -296,7 +375,6 @@ namespace ScreenSaver
             }
             else
             {
-                // Default selections if no registry value exists
                 foreach (ListViewItem item in fileTypesList.Items)
                 {
                     item.Checked = true;
@@ -304,13 +382,35 @@ namespace ScreenSaver
             }
         }
 
+        private void LoadVideoSettings()
+        {
+            cbx_UseVideo.Checked = registryManager.getBooleanPropertyVal(RegistryConstants.REG_KEY_USE_VIDEO, false);
+            cbx_VideoMute.Checked = registryManager.getBooleanPropertyVal(RegistryConstants.REG_KEY_VIDEO_MUTE, true);
+
+            string durationIndex = registryManager.getRegistryProperty(RegistryConstants.REG_KEY_VideoDuration, "2");
+            int index;
+            if (int.TryParse(durationIndex, out index) && index >= 0 && index < comboBoxVideoDuration.Items.Count)
+            {
+                comboBoxVideoDuration.SelectedIndex = index;
+            }
+            else
+            {
+                comboBoxVideoDuration.SelectedIndex = 2;
+            }
+        }
+
         private void UpdateUIVisibility()
         {
+            bool useVideo = cbx_UseVideo.Checked;
+
             comboBoxFileNameDisplay.Visible = cbx_showFileNames.Checked;
             labelFileNameDisplay.Visible = cbx_showFileNames.Checked;
             btnChangeFont.Visible = cbx_showFileNames.Checked;
             UpdateFileNameSample();
 
+            cbx_VideoMute.Enabled = useVideo;
+            comboBoxVideoDuration.Enabled = useVideo;
+            labelVideoDuration.Enabled = useVideo;
         }
 
         private void btnSave_Click(object sender, EventArgs e)
@@ -338,27 +438,30 @@ namespace ScreenSaver
                 }
                 registryManager.setImageFolders(imageFolders);
 
-                // Save file type selections
-                StringBuilder selectedFileTypes = new StringBuilder();
+                // Save file type selections (images and videos stored separately)
+                StringBuilder selectedImageTypes = new StringBuilder();
+                StringBuilder selectedVideoTypes = new StringBuilder();
                 foreach (ListViewItem item in fileTypesList.Items)
                 {
-                    if (item.Checked)
-                    {
-                        if (selectedFileTypes.Length > 0)
-                            selectedFileTypes.Append(";");
-                        selectedFileTypes.Append(item.Name);
-                    }
-                }
-                registryManager.setRegistryProperty(RegistryConstants.REG_KEY_FILE_TYPES, selectedFileTypes.ToString());
+                    if (!item.Checked) continue;
 
-                // Save other settings
-                registryManager.setBooleanPropertyVal(RegistryConstants.REG_KEY_SHOW_FILENAME, cbx_showFileNames.Checked);
-                registryManager.setRegistryProperty(RegistryConstants.REG_KEY_FILENAME_DISPLAY_MODE, comboBoxFileNameDisplay.SelectedIndex.ToString());
+                    bool isVideoType = IsVideoExtension(item.Name);
+                    StringBuilder target = isVideoType ? selectedVideoTypes : selectedImageTypes;
+                    if (target.Length > 0)
+                        target.Append(";");
+                    target.Append(item.Name);
+                }
+                registryManager.setRegistryProperty(RegistryConstants.REG_KEY_FILE_TYPES, selectedImageTypes.ToString());
+                registryManager.setRegistryProperty(RegistryConstants.REG_KEY_VIDEO_FILE_TYPES,
+                    selectedVideoTypes.Length > 0 ? selectedVideoTypes.ToString() : RegistryConstants.DefaultVideoFileTypes);
+
+                SaveControlSettings(this);
+                registryManager.setBooleanPropertyVal(RegistryConstants.REG_KEY_DEBUG, cbx_debug.Checked);
+
                 registryManager.setRegistryProperty(RegistryConstants.REG_KEY_FILENAME_FONT, FontToString(labelFileNameSample.Font));
                 registryManager.setRegistryProperty(RegistryConstants.REG_KEY_FILENAME_COLOR, ColorTranslator.ToHtml(labelFileNameSample.ForeColor));
 
-                // Save debug setting
-                registryManager.setBooleanPropertyVal(RegistryConstants.REG_KEY_DEBUG, cbx_debug.Checked);
+                Form1.ResetSharedCatalog();
 
                 // Show save confirmation
                 toolStripStatusLabel.Text = "Settings saved successfully";
@@ -457,15 +560,24 @@ namespace ScreenSaver
             UpdateUIVisibility();
         }
 
+        private static bool IsVideoExtension(string extension)
+        {
+            if (string.IsNullOrEmpty(extension)) return false;
+            string ext = extension.ToLowerInvariant();
+            return ext == "*.mp4" || ext == "*.avi" || ext == "*.wmv" || ext == "*.mov";
+        }
+
         public void btnPreview_Click(object sender, EventArgs e)
         {
             SaveSettings();
+            Form1.ResetSharedCatalog();
             runScreensaver(cbx_AllScreens.Checked);
         }
 
         public void runScreensaver(Boolean allScreens, Boolean destroyOnClose = false)
         {
             CloseAllFrames();
+            Form1.ResetSharedCatalog();
             List<Screen> orderedScreens = new List<Screen>(Screen.AllScreens);
 
             if (allScreens)
@@ -473,15 +585,8 @@ namespace ScreenSaver
                 for (int i = 0; i < orderedScreens.Count; i++)
                 {
                     Screen screen = orderedScreens[i];
-                    Form1 form = new Form1(this, screen);
-                    if (destroyOnClose)
-                    {
-                        form.FormClosed += ScreensaverForm_FormClosed_Exit;
-                    }
-                    else
-                    {
-                        form.FormClosed += ScreensaverForm_FormClosed;
-                    }
+                    Form form = new Form1(this, screen);
+                    AttachScreensaverFormClosed(form, destroyOnClose);
                     form.Show();
                     previewForms.Add(form);
                 }
@@ -489,24 +594,27 @@ namespace ScreenSaver
             else
             {
                 Screen selectedScreen = orderedScreens.Count > 0 ? orderedScreens[0] : Screen.PrimaryScreen;
-                Form1 form = new Form1(this, selectedScreen);
-                if (destroyOnClose)
-                {
-                    form.FormClosed += ScreensaverForm_FormClosed_Exit;
-                }
-                else
-                {
-                    form.FormClosed += ScreensaverForm_FormClosed;
-                }
+                Form form = new Form1(this, selectedScreen);
+                AttachScreensaverFormClosed(form, destroyOnClose);
                 form.Show();
                 previewForms.Add(form);
             }
 
-            // If in screensaver mode, run the application until forms are closed
+            if (destroyOnClose && previewForms.Count > 0)
+            {
+                Application.Run(previewForms[0]);
+            }
+        }
+
+        private void AttachScreensaverFormClosed(Form form, bool destroyOnClose)
+        {
             if (destroyOnClose)
             {
-                Form1 mainForm = previewForms[0];
-                Application.Run(mainForm);
+                form.FormClosed += ScreensaverForm_FormClosed_Exit;
+            }
+            else
+            {
+                form.FormClosed += ScreensaverForm_FormClosed;
             }
         }
 
@@ -527,11 +635,11 @@ namespace ScreenSaver
         public void CloseAllFrames()
         {
             if (previewForms == null)
-                previewForms = new List<Form1>();
+                previewForms = new List<Form>();
 
             if (previewForms.Count > 0)
             {
-                foreach (Form1 previewForm in previewForms)
+                foreach (Form previewForm in previewForms)
                 {
                     previewForm.FormClosed -= ScreensaverForm_FormClosed;
                     previewForm.FormClosed -= ScreensaverForm_FormClosed_Exit;

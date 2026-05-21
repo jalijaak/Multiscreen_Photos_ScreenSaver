@@ -52,7 +52,7 @@ namespace ScreenSaver
                     }
                 }
 
-                isDebugMode = registryManager.getBooleanPropertyVal(RegistryConstants.REG_KEY_DEBUG);
+                isDebugMode = registryManager.getBooleanPropertyVal(RegistryConstants.REG_KEY_DEBUG, false);
                 Logger.WriteDebugLog($"Application started with arguments: {string.Join(", ", args)}");
 
                 // Process screensaver standard arguments:
@@ -102,7 +102,6 @@ namespace ScreenSaver
                         Logger.WriteDebugLog($"Preview host rect available={hasPreviewRect}");
                     }
 
-                    // Create a preview form
                     Form previewForm = new Form1(settings, Screen.PrimaryScreen, true);
                     previewForm.FormBorderStyle = FormBorderStyle.None;
                     previewForm.StartPosition = FormStartPosition.Manual;
@@ -299,7 +298,7 @@ namespace ScreenSaver
 
         private static void CreateScreenSaverForms()
         {
-            // Create forms for all screens
+            Form1.ResetSharedCatalog();
             for (int i = 0; i < Screen.AllScreens.Length; i++)
             {
                 Screen screen = Screen.AllScreens[i];
