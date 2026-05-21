@@ -320,11 +320,12 @@ namespace ScreenSaver
 
                 int slotIndex = i;
                 slot.VideoEnded += (s, e) => OnVideoEnded(slotIndex);
+                slot.VideoAborted += (s, e) => OnVideoAborted(slotIndex);
                 slot.VideoStopped += (s, e) =>
                 {
                     if (activeVideoFrameIndex == slotIndex)
                         activeVideoFrameIndex = null;
-                    if (!frames[slotIndex].IsVideoActive)
+                    if (!frames[slotIndex].IsVideoActive && frames[slotIndex].HasDisplayableImage)
                         frameTimers[slotIndex].Start();
                 };
 
@@ -349,15 +350,24 @@ namespace ScreenSaver
             if (activeVideoFrameIndex == frameIndex)
                 activeVideoFrameIndex = null;
 
-            // Always finalize; SignalVideoEnded may have already stopped WMP but not raised VideoStopped.
-            frames[frameIndex].StopVideoPlayback();
-
-            NavigateFrameNext(frameIndex);
+            // SignalVideoEnded already released WMP; advance to next history item.
+            NavigateFrameNext(frameIndex, navSource: "video-ended");
         }
 
-        private void NavigateFrameNext(int frameIndex, bool userInitiated = false)
+        private void OnVideoAborted(int frameIndex)
         {
-            string navSource = userInitiated ? "arrow-next" : "timer-next";
+            WriteErrorLog($"OnVideoAborted (unexpected stop) {GetFrameStateSummary(frameIndex)}");
+
+            if (activeVideoFrameIndex == frameIndex)
+                activeVideoFrameIndex = null;
+
+            NavigateFrameNext(frameIndex, navSource: "video-aborted");
+        }
+
+        private void NavigateFrameNext(int frameIndex, bool userInitiated = false, string navSource = null)
+        {
+            if (string.IsNullOrEmpty(navSource))
+                navSource = userInitiated ? "arrow-next" : "timer-next";
             if (!CanNavigateFrame(frameIndex))
             {
                 WriteErrorLog($"NavigateFrameNext blocked ({navSource}): {GetFrameStateSummary(frameIndex)}");
@@ -388,9 +398,10 @@ namespace ScreenSaver
             DisplayFileOnFrame(frameIndex, filePath, navSource);
         }
 
-        private void NavigateFramePrevious(int frameIndex, bool userInitiated = false)
+        private void NavigateFramePrevious(int frameIndex, bool userInitiated = false, string navSource = null)
         {
-            string navSource = userInitiated ? "arrow-previous" : "timer-previous";
+            if (string.IsNullOrEmpty(navSource))
+                navSource = userInitiated ? "arrow-previous" : "timer-previous";
             if (!CanNavigateFrame(frameIndex))
             {
                 WriteErrorLog($"NavigateFramePrevious blocked ({navSource}): {GetFrameStateSummary(frameIndex)}");
@@ -447,7 +458,7 @@ namespace ScreenSaver
             if (activeVideoFrameIndex == frameIndex)
                 activeVideoFrameIndex = null;
 
-            frames[frameIndex].StopVideoPlayback();
+            frames[frameIndex].StopVideoPlayback(raiseAbortedEvent: false);
         }
 
         private bool CanNavigateFrame(int frameIndex)

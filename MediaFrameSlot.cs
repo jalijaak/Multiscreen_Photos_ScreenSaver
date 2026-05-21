@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
@@ -24,6 +25,10 @@ namespace ScreenSaver
 
         public event EventHandler VideoEnded;
         public event EventHandler VideoStopped;
+        public event EventHandler VideoAborted;
+
+        private int lastLoggedPlayState = -1;
+        private static readonly Random videoRandom = new Random();
 
         public bool IsVideoActive => isVideoActive;
 
@@ -87,7 +92,7 @@ namespace ScreenSaver
 
         public bool ShowImage(string filePath, AnimationTypes effect, int animationStepInterval, float effectDuration, string displayName = null)
         {
-            StopVideoPlayback();
+            StopVideoPlayback(raiseAbortedEvent: false);
             ClearAnimatedImage();
 
             if (!File.Exists(filePath))
@@ -97,24 +102,35 @@ namespace ScreenSaver
                 return false;
             }
 
+            long fileBytes = 0;
+            try
+            {
+                fileBytes = new FileInfo(filePath).Length;
+            }
+            catch (Exception ex)
+            {
+                Logger.WriteErrorLog($"ShowImage: cannot read file info '{filePath}'", ex);
+            }
+
             try
             {
                 imageControl.Visible = true;
                 imageControl.BringToFront();
                 imageControl.AnimationSpeed = effectDuration;
                 imageControl.AnimationType = effect;
-                using (Bitmap bmp = new Bitmap(filePath))
+                using (FileStream stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                using (Image img = Image.FromStream(stream))
                 {
-                    imageControl.AnimatedImage = new Bitmap(bmp);
+                    imageControl.AnimatedImage = new Bitmap(img);
                 }
+                Logger.WriteDebugLog($"ShowImage OK: {Path.GetFileName(filePath)} ({fileBytes} bytes)");
                 imageControl.imageName = displayName ?? Path.GetFileName(filePath);
                 imageControl.Animate(animationStepInterval);
-                Logger.WriteDebugLog($"ShowImage OK: {Path.GetFileName(filePath)}");
                 return true;
             }
             catch (Exception ex)
             {
-                Logger.WriteErrorLog($"ShowImage failed for '{filePath}'", ex);
+                Logger.WriteErrorLog($"ShowImage failed for '{filePath}' ({fileBytes} bytes)", ex);
                 HideEmptyImageSurface();
                 return false;
             }
@@ -142,10 +158,12 @@ namespace ScreenSaver
             currentVideoPath = filePath;
             isVideoActive = true;
             videoEndSignaled = false;
+            lastLoggedPlayState = -1;
             effectiveMaxPlaySeconds = videoClipLengthSeconds;
             videoPlayStartTime = DateTime.MinValue;
 
             videoPlayer.URL = filePath;
+            ApplyVideoDisplaySettings();
             videoPlayer.Visible = true;
             videoPlayer.BringToFront();
             if (fileNameLabel.Visible)
@@ -157,17 +175,25 @@ namespace ScreenSaver
             return true;
         }
 
-        public void StopVideoPlayback()
+        public void StopVideoPlayback(bool raiseAbortedEvent = true)
         {
             if (!isVideoActive && videoPlayer == null) return;
 
+            bool wasActive = isVideoActive;
+            bool endedNormally = videoEndSignaled;
+            string pathForLog = currentVideoPath ?? "(none)";
+
             Logger.WriteDebugLog($"StopVideoPlayback. Before: {GetDiagnosticState()}");
+            if (wasActive && !endedNormally)
+            {
+                Logger.WriteDebugLog(
+                    $"StopVideoPlayback interrupted active video '{pathForLog}' (caller: {GetCallerName()}, raiseAborted={raiseAbortedEvent}). {GetDiagnosticState()}");
+            }
 
             isVideoActive = false;
             currentVideoPath = null;
             currentVideoDisplayName = null;
             videoPlayStartTime = DateTime.MinValue;
-            videoEndSignaled = false;
 
             if (videoDurationTimer != null)
                 videoDurationTimer.Stop();
@@ -178,6 +204,22 @@ namespace ScreenSaver
 
             VideoStopped?.Invoke(this, EventArgs.Empty);
             Logger.WriteDebugLog($"StopVideoPlayback done. After: {GetDiagnosticState()}");
+
+            if (wasActive && !endedNormally && raiseAbortedEvent)
+                VideoAborted?.Invoke(this, EventArgs.Empty);
+        }
+
+        private static string GetCallerName()
+        {
+            try
+            {
+                StackFrame frame = new StackFrame(2, false);
+                return frame.GetMethod()?.Name ?? "unknown";
+            }
+            catch
+            {
+                return "unknown";
+            }
         }
 
         private void ReleaseWmpPlayback()
@@ -231,6 +273,7 @@ namespace ScreenSaver
 
             videoPlayer.enableContextMenu = false;
             videoPlayer.uiMode = "none";
+            videoPlayer.stretchToFit = true;
             videoPlayer.Visible = false;
             videoPlayer.Cursor = Cursors.Hand;
             videoPlayerInitialized = true;
@@ -268,26 +311,78 @@ namespace ScreenSaver
 
         private void VideoPlayer_PlayStateChange(object sender, AxWMPLib._WMPOCXEvents_PlayStateChangeEvent e)
         {
-            Logger.WriteDebugLog($"WMP PlayStateChange: {e.newState} path={currentVideoPath ?? "(none)"}");
+            if (e.newState != lastLoggedPlayState)
+            {
+                lastLoggedPlayState = e.newState;
+                Logger.WriteDebugLog($"WMP PlayStateChange: {e.newState} path={currentVideoPath ?? "(none)"}");
+            }
 
             // State 3 = playing
             if (e.newState == 3)
             {
+                ApplyVideoDisplaySettings();
                 ApplyMuteSettings();
                 UpdateEffectiveMaxPlaySeconds();
+                ApplyRandomStartPositionIfNeeded();
                 videoPlayStartTime = DateTime.Now;
             }
             // State 8 = media ended (natural video length)
             else if (e.newState == 8)
             {
-                SignalVideoEnded();
+                if (isVideoActive && !videoEndSignaled)
+                    SignalVideoEnded();
             }
             // 1=stopped, 2=paused, 6=ready, 9=transition, 10=media failed
             else if (e.newState == 10)
             {
-                Logger.WriteErrorLog($"WMP media failed for '{currentVideoPath}'. State: {GetDiagnosticState()}");
-                SignalVideoEnded();
+                HandleWmpMediaFailed();
             }
+        }
+
+        private void HandleWmpMediaFailed()
+        {
+            if (!isVideoActive || videoEndSignaled)
+            {
+                Logger.WriteDebugLog(
+                    $"WMP state 10 ignored (cleanup). path={currentVideoPath ?? "(none)"} {GetDiagnosticState()}");
+                return;
+            }
+
+            string wmpError = GetWmpErrorDescription();
+            Logger.WriteErrorLog(
+                $"WMP media failed for '{currentVideoPath}'. {wmpError} State: {GetDiagnosticState()}");
+            SignalVideoEnded();
+        }
+
+        private string GetWmpErrorDescription()
+        {
+            try
+            {
+                if (videoPlayer != null)
+                    return $"WMP playState={videoPlayer.playState}";
+            }
+            catch (Exception ex)
+            {
+                return $"WMP state unavailable ({ex.Message})";
+            }
+
+            if (!string.IsNullOrEmpty(currentVideoPath) && !File.Exists(currentVideoPath))
+                return "file missing on disk";
+
+            if (!string.IsNullOrEmpty(currentVideoPath))
+            {
+                try
+                {
+                    long bytes = new FileInfo(currentVideoPath).Length;
+                    return $"file size={bytes} bytes (codec/OneDrive sync may block WMP)";
+                }
+                catch (Exception ex)
+                {
+                    return $"file size unreadable ({ex.Message})";
+                }
+            }
+
+            return "no media path";
         }
 
         private void UpdateEffectiveMaxPlaySeconds()
@@ -309,6 +404,41 @@ namespace ScreenSaver
             catch
             {
                 effectiveMaxPlaySeconds = videoClipLengthSeconds;
+            }
+        }
+
+        /// <summary>
+        /// When the file is longer than the clip limit, start at a random point that still allows
+        /// a full clip-length segment before the video ends.
+        /// </summary>
+        private void ApplyRandomStartPositionIfNeeded()
+        {
+            try
+            {
+                if (videoPlayer?.currentMedia == null || string.IsNullOrEmpty(currentVideoPath))
+                    return;
+
+                double naturalSeconds = videoPlayer.currentMedia.duration;
+                if (naturalSeconds <= videoClipLengthSeconds
+                    || naturalSeconds <= 0
+                    || double.IsInfinity(naturalSeconds)
+                    || double.IsNaN(naturalSeconds))
+                {
+                    return;
+                }
+
+                double maxStartSeconds = naturalSeconds - videoClipLengthSeconds;
+                if (maxStartSeconds <= 0)
+                    return;
+
+                double startSeconds = videoRandom.NextDouble() * maxStartSeconds;
+                videoPlayer.Ctlcontrols.currentPosition = startSeconds;
+                Logger.WriteDebugLog(
+                    $"Random video start at {startSeconds:F1}s (duration {naturalSeconds:F1}s, clip limit {videoClipLengthSeconds}s) for {Path.GetFileName(currentVideoPath)}");
+            }
+            catch (Exception ex)
+            {
+                Logger.WriteErrorLog($"ApplyRandomStartPosition failed for '{currentVideoPath}'", ex);
             }
         }
 
@@ -351,6 +481,21 @@ namespace ScreenSaver
         {
             fileNameLabel.Visible = false;
             fileNameLabel.Text = string.Empty;
+        }
+
+        private void ApplyVideoDisplaySettings()
+        {
+            if (videoPlayer == null) return;
+
+            try
+            {
+                videoPlayer.stretchToFit = true;
+                videoPlayer.uiMode = "none";
+            }
+            catch (Exception ex)
+            {
+                Logger.WriteErrorLog("ApplyVideoDisplaySettings failed", ex);
+            }
         }
 
         private void ApplyMuteSettings()
