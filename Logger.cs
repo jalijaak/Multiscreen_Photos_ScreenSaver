@@ -18,19 +18,51 @@ public static class Logger
     /// <param name="lineNumber">Automatically includes the line number from where the log was called.</param>
     public static void WriteDebugLog(
         string message,
-        [System.Runtime.CompilerServices.CallerMemberName] string methodName = "",
-        [System.Runtime.CompilerServices.CallerLineNumber] int lineNumber = 0)
+        [CallerMemberName] string methodName = "",
+        [CallerLineNumber] int lineNumber = 0)
+    {
+        WriteLogEntry("DEBUG", message, methodName, lineNumber, null);
+    }
+
+    /// <summary>
+    /// Writes an error to the same debug log file (always logged, not gated by screensaver debug mode).
+    /// </summary>
+    public static void WriteErrorLog(
+        string message,
+        [CallerMemberName] string methodName = "",
+        [CallerLineNumber] int lineNumber = 0)
+    {
+        WriteLogEntry("ERROR", message, methodName, lineNumber, null);
+    }
+
+    public static void WriteErrorLog(
+        string message,
+        Exception ex,
+        [CallerMemberName] string methodName = "",
+        [CallerLineNumber] int lineNumber = 0)
+    {
+        WriteLogEntry("ERROR", message, methodName, lineNumber, ex);
+    }
+
+    private static void WriteLogEntry(
+        string level,
+        string message,
+        string methodName,
+        int lineNumber,
+        Exception ex)
     {
         try
         {
             string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
-            string formattedMessage = $"[{timestamp}] ({methodName}:{lineNumber}) - {message}";
+            string formattedMessage = $"[{timestamp}] [{level}] ({methodName}:{lineNumber}) - {message}";
+            if (ex != null)
+                formattedMessage += $"{Environment.NewLine}  Exception: {ex.GetType().Name}: {ex.Message}{Environment.NewLine}  {ex.StackTrace}";
 
             File.AppendAllText(LOG_FILE_PATH, formattedMessage + Environment.NewLine);
         }
-        catch (Exception ex)
+        catch (Exception writeEx)
         {
-            Console.WriteLine($"Failed to write log entry: {ex.Message}");
+            Console.WriteLine($"Failed to write log entry: {writeEx.Message}");
         }
     }
 }

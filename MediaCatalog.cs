@@ -38,10 +38,20 @@ namespace ScreenSaver
         /// </summary>
         public string PickRandomForFrame(bool screenHasActiveVideoFrame)
         {
-            if (allMedia.Count == 0) return null;
+            if (allMedia.Count == 0)
+            {
+                Logger.WriteErrorLog("MediaCatalog.PickRandomForFrame: catalog is empty");
+                return null;
+            }
 
             if (!includeVideos || screenHasActiveVideoFrame)
             {
+                if (imageOnlyMedia.Count == 0)
+                {
+                    Logger.WriteErrorLog(
+                        $"MediaCatalog.PickRandomForFrame: no images available (screenHasActiveVideoFrame={screenHasActiveVideoFrame}, includeVideos={includeVideos})");
+                    return null;
+                }
                 return PickFromList(imageOnlyMedia);
             }
 

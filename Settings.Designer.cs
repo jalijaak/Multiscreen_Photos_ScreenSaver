@@ -612,7 +612,7 @@
             this.linkDebugLog.TabIndex = 6;
             this.linkDebugLog.TabStop = true;
             this.linkDebugLog.Text = "JJ_screensaver_debug.log";
-            this.linkDebugLog.Visible = false;
+            this.linkDebugLog.Visible = true;
             this.linkDebugLog.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.linkDebugLog_LinkClicked);
             // 
             // Settings

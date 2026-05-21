@@ -34,7 +34,11 @@ namespace ScreenSaver
             for (int attempt = 0; attempt < 20; attempt++)
             {
                 string path = pickRandom();
-                if (string.IsNullOrEmpty(path)) return null;
+                if (string.IsNullOrEmpty(path))
+                {
+                    Logger.WriteErrorLog($"FrameMediaHistory.GoNext: pickRandom returned null on attempt {attempt + 1}");
+                    return null;
+                }
 
                 if (!IsDuplicateOfLast(path))
                 {
@@ -43,6 +47,7 @@ namespace ScreenSaver
                 }
             }
 
+            Logger.WriteErrorLog("FrameMediaHistory.GoNext: exhausted 20 attempts (all duplicates)");
             return null;
         }
 
@@ -62,7 +67,11 @@ namespace ScreenSaver
             for (int attempt = 0; attempt < 20; attempt++)
             {
                 string path = pickRandom();
-                if (string.IsNullOrEmpty(path)) return null;
+                if (string.IsNullOrEmpty(path))
+                {
+                    Logger.WriteErrorLog($"FrameMediaHistory.GoPrevious: pickRandom returned null on attempt {attempt + 1}");
+                    return null;
+                }
 
                 if (!IsDuplicateOfFirst(path))
                 {
@@ -71,6 +80,7 @@ namespace ScreenSaver
                 }
             }
 
+            Logger.WriteErrorLog("FrameMediaHistory.GoPrevious: exhausted 20 attempts (all duplicates)");
             return null;
         }
 

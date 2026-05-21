@@ -77,6 +77,7 @@ namespace ScreenSaver
                         }
                         else
                         {
+                            Logger.WriteErrorLog($"EnforceGlobalSingleVideoPlayback: stopping extra video on frame {i}");
                             form.frames[i].StopVideoPlayback();
                             if (form.activeVideoFrameIndex == i)
                                 form.activeVideoFrameIndex = null;
@@ -183,15 +184,56 @@ namespace ScreenSaver
         private void WriteDebugLog(string message)
         {
             if (!isDebugMode) return;
+            WriteLog(message, isError: false);
+        }
+
+        private void WriteErrorLog(string message)
+        {
+            WriteLog(message, isError: true);
+        }
+
+        private void WriteErrorLog(string message, Exception ex)
+        {
+            Logger.WriteErrorLog(FormatLogMessage(message), ex);
+        }
+
+        private void WriteLog(string message, bool isError)
+        {
             try
             {
-                string screenInfo = screen != null ? screen.DeviceName : "NoScreen";
-                Logger.WriteDebugLog($"[{screenInfo}] {message}");
+                string formatted = FormatLogMessage(message);
+                if (isError)
+                    Logger.WriteErrorLog(formatted);
+                else
+                    Logger.WriteDebugLog(formatted);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Error writing to log: {ex.Message}");
             }
+        }
+
+        private string FormatLogMessage(string message)
+        {
+            string screenInfo = screen != null ? screen.DeviceName : "NoScreen";
+            return $"[{screenInfo}] {message}";
+        }
+
+        private string GetFrameStateSummary(int frameIndex)
+        {
+            if (frames == null || frameIndex < 0 || frameIndex >= frames.Length)
+                return "invalid-frame-index";
+
+            FrameMediaHistory history = frameHistories != null && frameIndex < frameHistories.Length
+                ? frameHistories[frameIndex]
+                : null;
+
+            string historyInfo = history != null
+                ? $"history={history.CurrentIndex + 1}/{history.Count} path={history.CurrentPath ?? "(none)"}"
+                : "history=(none)";
+
+            return $"frame={frameIndex} activeVideo={activeVideoFrameIndex?.ToString() ?? "none"} " +
+                   $"slot[{frames[frameIndex].GetDiagnosticState()}] {historyInfo}";
         }
 
         public Form1(Settings parent, Screen screen, bool isPreview = false)
@@ -302,6 +344,8 @@ namespace ScreenSaver
 
         private void OnVideoEnded(int frameIndex)
         {
+            WriteDebugLog($"OnVideoEnded {GetFrameStateSummary(frameIndex)}");
+
             if (activeVideoFrameIndex == frameIndex)
                 activeVideoFrameIndex = null;
 
@@ -313,7 +357,12 @@ namespace ScreenSaver
 
         private void NavigateFrameNext(int frameIndex, bool userInitiated = false)
         {
-            if (!CanNavigateFrame(frameIndex)) return;
+            string navSource = userInitiated ? "arrow-next" : "timer-next";
+            if (!CanNavigateFrame(frameIndex))
+            {
+                WriteErrorLog($"NavigateFrameNext blocked ({navSource}): {GetFrameStateSummary(frameIndex)}");
+                return;
+            }
 
             SyncActiveVideoFrameIndex();
 
@@ -327,14 +376,26 @@ namespace ScreenSaver
             }
 
             string filePath = frameHistories[frameIndex].GoNext(() => PickRandomForFrame(frameIndex));
-            if (string.IsNullOrEmpty(filePath)) return;
+            if (string.IsNullOrEmpty(filePath))
+            {
+                WriteErrorLog($"NavigateFrameNext: no file path ({navSource}). {GetFrameStateSummary(frameIndex)}");
+                if (userInitiated)
+                    TryRecoverBlackFrame(frameIndex, navSource);
+                return;
+            }
 
-            DisplayFileOnFrame(frameIndex, filePath, "next");
+            WriteDebugLog($"NavigateFrameNext ({navSource}): {Path.GetFileName(filePath)}. {GetFrameStateSummary(frameIndex)}");
+            DisplayFileOnFrame(frameIndex, filePath, navSource);
         }
 
         private void NavigateFramePrevious(int frameIndex, bool userInitiated = false)
         {
-            if (!CanNavigateFrame(frameIndex)) return;
+            string navSource = userInitiated ? "arrow-previous" : "timer-previous";
+            if (!CanNavigateFrame(frameIndex))
+            {
+                WriteErrorLog($"NavigateFramePrevious blocked ({navSource}): {GetFrameStateSummary(frameIndex)}");
+                return;
+            }
 
             SyncActiveVideoFrameIndex();
 
@@ -347,9 +408,38 @@ namespace ScreenSaver
             }
 
             string filePath = frameHistories[frameIndex].GoPrevious(() => PickRandomForFrame(frameIndex));
-            if (string.IsNullOrEmpty(filePath)) return;
+            if (string.IsNullOrEmpty(filePath))
+            {
+                WriteErrorLog($"NavigateFramePrevious: no file path ({navSource}). {GetFrameStateSummary(frameIndex)}");
+                if (userInitiated)
+                    TryRecoverBlackFrame(frameIndex, navSource);
+                return;
+            }
 
-            DisplayFileOnFrame(frameIndex, filePath, "previous");
+            WriteDebugLog($"NavigateFramePrevious ({navSource}): {Path.GetFileName(filePath)}. {GetFrameStateSummary(frameIndex)}");
+            DisplayFileOnFrame(frameIndex, filePath, navSource);
+        }
+
+        private void TryRecoverBlackFrame(int frameIndex, string reason)
+        {
+            WriteErrorLog($"TryRecoverBlackFrame ({reason}): attempting recovery. {GetFrameStateSummary(frameIndex)}");
+
+            for (int attempt = 0; attempt < 10; attempt++)
+            {
+                string path = mediaCatalog.PickRandomForFrame(screenHasActiveVideoFrame: false);
+                if (string.IsNullOrEmpty(path) || !File.Exists(path))
+                    continue;
+
+                if (MediaCatalog.IsVideoFile(path) && (IsAnotherFormPlayingVideo() || activeVideoFrameIndex.HasValue))
+                    continue;
+
+                frameHistories[frameIndex].SetCurrentEntry(path);
+                WriteDebugLog($"TryRecoverBlackFrame: using {Path.GetFileName(path)} on attempt {attempt + 1}");
+                DisplayFileOnFrame(frameIndex, path, "recover");
+                return;
+            }
+
+            WriteErrorLog($"TryRecoverBlackFrame failed ({reason}): frame may stay black. {GetFrameStateSummary(frameIndex)}");
         }
 
         private void StopVideoForUserNavigation(int frameIndex)
@@ -380,13 +470,20 @@ namespace ScreenSaver
             bool screenHasVideo = activeVideoFrameIndex.HasValue || IsAnotherFormPlayingVideo();
             string path = mediaCatalog.PickRandomForFrame(screenHasVideo);
 
-            if (string.IsNullOrEmpty(path)) return null;
+            if (string.IsNullOrEmpty(path))
+            {
+                WriteErrorLog($"PickRandomForFrame: catalog returned null (screenHasVideo={screenHasVideo}). {GetFrameStateSummary(frameIndex)}");
+                return null;
+            }
 
             if (MediaCatalog.IsVideoFile(path)
                 && screenHasVideo
                 && activeVideoFrameIndex != frameIndex)
             {
-                path = mediaCatalog.PickRandomForFrame(true);
+                string imagePath = mediaCatalog.PickRandomForFrame(true);
+                if (string.IsNullOrEmpty(imagePath))
+                    WriteErrorLog($"PickRandomForFrame: video pick blocked and no image alternative. {GetFrameStateSummary(frameIndex)}");
+                path = imagePath;
             }
 
             return path;
@@ -394,7 +491,18 @@ namespace ScreenSaver
 
         private void DisplayFileOnFrame(int frameIndex, string filePath, string reason)
         {
-            if (string.IsNullOrEmpty(filePath)) return;
+            if (string.IsNullOrEmpty(filePath))
+            {
+                WriteErrorLog($"DisplayFileOnFrame ({reason}): empty path. {GetFrameStateSummary(frameIndex)}");
+                return;
+            }
+
+            if (!File.Exists(filePath))
+            {
+                WriteErrorLog($"DisplayFileOnFrame ({reason}): file missing '{filePath}'. {GetFrameStateSummary(frameIndex)}");
+                TryRecoverBlackFrame(frameIndex, reason);
+                return;
+            }
 
             SyncActiveVideoFrameIndex();
 
@@ -405,13 +513,17 @@ namespace ScreenSaver
                     string fallback = mediaCatalog.PickRandomForFrame(true);
                     if (string.IsNullOrEmpty(fallback) || MediaCatalog.IsVideoFile(fallback))
                     {
-                        WriteDebugLog($"Frame {frameIndex} ({reason}): video blocked, another screen is playing video");
+                        WriteErrorLog($"DisplayFileOnFrame ({reason}): video blocked (other screen), no image fallback. {GetFrameStateSummary(frameIndex)}");
+                        if (reason.StartsWith("arrow", StringComparison.Ordinal))
+                            TryRecoverBlackFrame(frameIndex, reason);
                         return;
                     }
 
                     frameHistories[frameIndex].SetCurrentEntry(fallback);
-                    ShowImageOnFrame(frameIndex, fallback);
-                    frameTimers[frameIndex].Start();
+                    if (!ShowImageOnFrame(frameIndex, fallback))
+                        TryRecoverBlackFrame(frameIndex, reason);
+                    else
+                        frameTimers[frameIndex].Start();
                     WriteDebugLog($"Frame {frameIndex} ({reason}): image fallback (video on another screen) {Path.GetFileName(fallback)}");
                     return;
                 }
@@ -421,13 +533,17 @@ namespace ScreenSaver
                     string fallback = mediaCatalog.PickRandomForFrame(true);
                     if (string.IsNullOrEmpty(fallback) || MediaCatalog.IsVideoFile(fallback))
                     {
-                        WriteDebugLog($"Frame {frameIndex} ({reason}): video blocked, no image fallback");
+                        WriteErrorLog($"DisplayFileOnFrame ({reason}): video blocked (other frame), no image fallback. {GetFrameStateSummary(frameIndex)}");
+                        if (reason.StartsWith("arrow", StringComparison.Ordinal))
+                            TryRecoverBlackFrame(frameIndex, reason);
                         return;
                     }
 
                     frameHistories[frameIndex].SetCurrentEntry(fallback);
-                    ShowImageOnFrame(frameIndex, fallback);
-                    frameTimers[frameIndex].Start();
+                    if (!ShowImageOnFrame(frameIndex, fallback))
+                        TryRecoverBlackFrame(frameIndex, reason);
+                    else
+                        frameTimers[frameIndex].Start();
                     WriteDebugLog($"Frame {frameIndex} ({reason}): image fallback {Path.GetFileName(fallback)}");
                     return;
                 }
@@ -436,7 +552,13 @@ namespace ScreenSaver
                 StopVideoOnAllFramesExcept(frameIndex);
                 activeVideoFrameIndex = frameIndex;
                 frames[frameIndex].ConfigureDisplay(showFileName, fileNameFont, fileNameColor, fileNameDisplayMode);
-                frames[frameIndex].ShowVideo(filePath, FormatDisplayName(filePath));
+                if (!frames[frameIndex].ShowVideo(filePath, FormatDisplayName(filePath)))
+                {
+                    WriteErrorLog($"DisplayFileOnFrame ({reason}): ShowVideo failed. {GetFrameStateSummary(frameIndex)}");
+                    activeVideoFrameIndex = null;
+                    TryRecoverBlackFrame(frameIndex, reason);
+                    return;
+                }
                 frameTimers[frameIndex].Stop();
                 WriteDebugLog($"Frame {frameIndex} ({reason}): video {Path.GetFileName(filePath)} [history {frameHistories[frameIndex].CurrentIndex + 1}/{frameHistories[frameIndex].Count}]");
             }
@@ -448,8 +570,10 @@ namespace ScreenSaver
                 if (frames[frameIndex].IsVideoActive)
                     frames[frameIndex].StopVideoPlayback();
 
-                ShowImageOnFrame(frameIndex, filePath);
-                frameTimers[frameIndex].Start();
+                if (!ShowImageOnFrame(frameIndex, filePath))
+                    TryRecoverBlackFrame(frameIndex, reason);
+                else
+                    frameTimers[frameIndex].Start();
                 WriteDebugLog($"Frame {frameIndex} ({reason}): image {Path.GetFileName(filePath)} [history {frameHistories[frameIndex].CurrentIndex + 1}/{frameHistories[frameIndex].Count}]");
             }
         }
@@ -513,18 +637,25 @@ namespace ScreenSaver
             frameTimers[frameIndex].Start();
         }
 
-        private void ShowImageOnFrame(int frameIndex, string filePath)
+        private bool ShowImageOnFrame(int frameIndex, string filePath)
         {
             if (!File.Exists(filePath))
             {
+                WriteErrorLog($"ShowImageOnFrame: file missing '{filePath}'. Refreshing catalog. {GetFrameStateSummary(frameIndex)}");
                 ResetSharedCatalog();
                 mediaCatalog = GetSharedCatalog(registryManager);
-                return;
+                return false;
             }
 
             frames[frameIndex].ConfigureDisplay(showFileName, fileNameFont, fileNameColor, fileNameDisplayMode);
             AnimationTypes effect = useEffects ? effectsList.PickRandom() : AnimationTypes.None;
-            frames[frameIndex].ShowImage(filePath, effect, animationStepInterval, effectDurationVal, FormatDisplayName(filePath));
+            bool shown = frames[frameIndex].ShowImage(
+                filePath, effect, animationStepInterval, effectDurationVal, FormatDisplayName(filePath));
+
+            if (!shown)
+                WriteErrorLog($"ShowImageOnFrame failed for '{filePath}'. {GetFrameStateSummary(frameIndex)}");
+
+            return shown;
         }
 
         private string FormatDisplayName(string filePath)

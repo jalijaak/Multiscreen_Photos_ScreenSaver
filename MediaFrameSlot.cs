@@ -27,6 +27,16 @@ namespace ScreenSaver
 
         public bool IsVideoActive => isVideoActive;
 
+        public bool HasDisplayableImage => imageControl.AnimatedImage != null;
+
+        public string GetDiagnosticState()
+        {
+            string videoPath = currentVideoPath ?? "(none)";
+            string wmpState = videoPlayer == null ? "no-player" : $"visible={videoPlayer.Visible}";
+            return $"videoActive={isVideoActive}, hasImage={HasDisplayableImage}, imageVisible={imageControl.Visible}, " +
+                   $"wmp={wmpState}, path={videoPath}, videoEnded={videoEndSignaled}";
+        }
+
         public MediaFrameSlot()
         {
             BackColor = Color.Black;
@@ -75,12 +85,17 @@ namespace ScreenSaver
             ApplyMuteSettings();
         }
 
-        public void ShowImage(string filePath, AnimationTypes effect, int animationStepInterval, float effectDuration, string displayName = null)
+        public bool ShowImage(string filePath, AnimationTypes effect, int animationStepInterval, float effectDuration, string displayName = null)
         {
             StopVideoPlayback();
             ClearAnimatedImage();
 
-            if (!File.Exists(filePath)) return;
+            if (!File.Exists(filePath))
+            {
+                Logger.WriteErrorLog($"ShowImage: file not found '{filePath}'. State: {GetDiagnosticState()}");
+                HideEmptyImageSurface();
+                return false;
+            }
 
             try
             {
@@ -94,16 +109,24 @@ namespace ScreenSaver
                 }
                 imageControl.imageName = displayName ?? Path.GetFileName(filePath);
                 imageControl.Animate(animationStepInterval);
+                Logger.WriteDebugLog($"ShowImage OK: {Path.GetFileName(filePath)}");
+                return true;
             }
             catch (Exception ex)
             {
-                Logger.WriteDebugLog($"MediaFrameSlot image error {filePath}: {ex.Message}");
+                Logger.WriteErrorLog($"ShowImage failed for '{filePath}'", ex);
+                HideEmptyImageSurface();
+                return false;
             }
         }
 
-        public void ShowVideo(string filePath, string displayName = null)
+        public bool ShowVideo(string filePath, string displayName = null)
         {
-            if (!File.Exists(filePath)) return;
+            if (!File.Exists(filePath))
+            {
+                Logger.WriteErrorLog($"ShowVideo: file not found '{filePath}'. State: {GetDiagnosticState()}");
+                return false;
+            }
 
             EnsureVideoPlayer();
             ClearAnimatedImage();
@@ -130,11 +153,15 @@ namespace ScreenSaver
             videoPlayer.Ctlcontrols.play();
             ApplyMuteSettings();
             StartVideoDurationTimer();
+            Logger.WriteDebugLog($"ShowVideo started: {Path.GetFileName(filePath)}");
+            return true;
         }
 
         public void StopVideoPlayback()
         {
             if (!isVideoActive && videoPlayer == null) return;
+
+            Logger.WriteDebugLog($"StopVideoPlayback. Before: {GetDiagnosticState()}");
 
             isVideoActive = false;
             currentVideoPath = null;
@@ -147,20 +174,38 @@ namespace ScreenSaver
 
             ReleaseWmpPlayback();
             HideVideoFileNameLabel();
+            ShowImageSurfaceIfAvailable();
 
-            imageControl.Visible = true;
-            imageControl.BringToFront();
             VideoStopped?.Invoke(this, EventArgs.Empty);
+            Logger.WriteDebugLog($"StopVideoPlayback done. After: {GetDiagnosticState()}");
         }
 
         private void ReleaseWmpPlayback()
         {
             if (videoPlayer == null) return;
 
-            try { videoPlayer.Ctlcontrols.stop(); } catch { }
-            try { videoPlayer.close(); } catch { }
+            try { videoPlayer.Ctlcontrols.stop(); } catch (Exception ex) { Logger.WriteErrorLog("WMP stop failed", ex); }
+            try { videoPlayer.close(); } catch (Exception ex) { Logger.WriteErrorLog("WMP close failed", ex); }
 
             videoPlayer.Visible = false;
+        }
+
+        private void ShowImageSurfaceIfAvailable()
+        {
+            if (HasDisplayableImage)
+            {
+                imageControl.Visible = true;
+                imageControl.BringToFront();
+            }
+            else
+            {
+                HideEmptyImageSurface();
+            }
+        }
+
+        private void HideEmptyImageSurface()
+        {
+            imageControl.Visible = false;
         }
 
         private void ClearAnimatedImage()
@@ -223,6 +268,8 @@ namespace ScreenSaver
 
         private void VideoPlayer_PlayStateChange(object sender, AxWMPLib._WMPOCXEvents_PlayStateChangeEvent e)
         {
+            Logger.WriteDebugLog($"WMP PlayStateChange: {e.newState} path={currentVideoPath ?? "(none)"}");
+
             // State 3 = playing
             if (e.newState == 3)
             {
@@ -233,6 +280,12 @@ namespace ScreenSaver
             // State 8 = media ended (natural video length)
             else if (e.newState == 8)
             {
+                SignalVideoEnded();
+            }
+            // 1=stopped, 2=paused, 6=ready, 9=transition, 10=media failed
+            else if (e.newState == 10)
+            {
+                Logger.WriteErrorLog($"WMP media failed for '{currentVideoPath}'. State: {GetDiagnosticState()}");
                 SignalVideoEnded();
             }
         }
@@ -275,9 +328,9 @@ namespace ScreenSaver
             currentVideoDisplayName = null;
             videoPlayStartTime = DateTime.MinValue;
             HideVideoFileNameLabel();
-            imageControl.Visible = true;
-            imageControl.BringToFront();
+            HideEmptyImageSurface();
 
+            Logger.WriteDebugLog($"SignalVideoEnded. State: {GetDiagnosticState()}");
             VideoEnded?.Invoke(this, EventArgs.Empty);
         }
 

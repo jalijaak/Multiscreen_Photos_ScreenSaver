@@ -569,12 +569,14 @@ namespace ScreenSaver
 
         private void UpdateDebugLogLinkVisibility()
         {
-            bool debugActive = cbx_debug.Checked;
-            linkDebugLog.Visible = debugActive;
-            if (!debugActive) return;
-
+            linkDebugLog.Visible = true;
             linkDebugLog.Text = Path.GetFileName(Logger.DebugLogFilePath);
-            toolTip1.SetToolTip(linkDebugLog, Logger.DebugLogFilePath);
+            string tooltip = Logger.DebugLogFilePath;
+            if (cbx_debug.Checked)
+                tooltip += " (errors always logged; verbose DEBUG when Debug is checked)";
+            else
+                tooltip += " (errors always logged; enable Debug for verbose logging)";
+            toolTip1.SetToolTip(linkDebugLog, tooltip);
         }
 
         private void linkDebugLog_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
