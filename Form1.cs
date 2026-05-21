@@ -1,72 +1,71 @@
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
 using System.Drawing;
 using System.IO;
 using System.Linq;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace ScreenSaver
 {
     public partial class Form1 : Form
     {
-        // Add debug constants
-        private bool isDebugMode = false;
+        private static MediaCatalog sharedCatalog;
+        private static readonly object CatalogLock = new object();
 
+        private bool isDebugMode;
         private RegistryManager registryManager;
-        private Boolean useEffects;
-        private Boolean showFileName;
+        private MediaCatalog mediaCatalog;
+        private bool useEffects;
+        private bool showFileName;
         private int fileNameDisplayMode;
         private Font fileNameFont;
         private Color fileNameColor;
         private float effectDurationVal;
         private int delayBetweenImages;
+        private int videoDurationSeconds;
         private List<AnimationTypes> effectsList = new List<AnimationTypes>();
         private SortedDictionary<string, bool> imageFolders = new SortedDictionary<string, bool>();
-        private List<String> images = new List<string>();
-        private AnimationControl animationControl; // Single control instead of list
-        private int imagesCount = 0;
 
-        private const int MAX_HISTORY_SIZE = 2000;
-        private List<string> imageHistory = new List<string>();
-        private int currentImageIndex = -1;
+        private TableLayoutPanel frameGrid;
+        private MediaFrameSlot[] frames;
+        private Timer[] frameTimers;
+        private FrameMediaHistory[] frameHistories;
+        private int? activeVideoFrameIndex;
 
         private DateTime lastKeyPressTime = DateTime.MinValue;
         private readonly TimeSpan KEY_PRESS_DELAY = TimeSpan.FromMilliseconds(200);
 
         private int animationSteps = 15;
         private int animationStepInterval;
-        private int previous = 0;
         private Screen screen;
         private Settings parent;
-        private bool isPreviewMode = false;
+        private bool isPreviewMode;
 
-        private int ScreenNumber
+        public static void ResetSharedCatalog()
         {
-            get
+            lock (CatalogLock)
             {
-                for (int i = 0; i < Screen.AllScreens.Length; i++)
-                {
-                    if (Screen.AllScreens[i] == screen)
-                        return i;
-                }
-                return 0;
+                sharedCatalog = null;
+            }
+        }
+
+        private static MediaCatalog GetSharedCatalog(RegistryManager registryManager)
+        {
+            lock (CatalogLock)
+            {
+                if (sharedCatalog == null)
+                    sharedCatalog = new MediaCatalog(registryManager);
+                return sharedCatalog;
             }
         }
 
         private void WriteDebugLog(string message)
         {
             if (!isDebugMode) return;
-
             try
             {
                 string screenInfo = screen != null ? screen.DeviceName : "NoScreen";
-                string logEntry = $"[{screenInfo}] {message}";
-                Logger.WriteDebugLog(logEntry);
+                Logger.WriteDebugLog($"[{screenInfo}] {message}");
             }
             catch (Exception ex)
             {
@@ -76,8 +75,7 @@ namespace ScreenSaver
 
         public Form1(Settings parent, Screen screen, bool isPreview = false)
         {
-            // Check debug mode
-            this.registryManager = new RegistryManager();
+            registryManager = new RegistryManager();
             isDebugMode = registryManager.getBooleanPropertyVal(RegistryConstants.REG_KEY_DEBUG, false);
 
             InitializeComponent();
@@ -86,105 +84,267 @@ namespace ScreenSaver
             this.parent = parent;
             this.isPreviewMode = isPreview;
 
-            WriteDebugLog($"Initializing screensaver form (Preview: {isPreview})");
+            ResetSharedCatalog();
+            mediaCatalog = GetSharedCatalog(registryManager);
 
-            // Load delay between images setting (in seconds) and set timer interval (in milliseconds)
-            delayBetweenImages = int.Parse(registryManager.getRegistryProperty(RegistryConstants.REG_KEY_DELAY_BETWEEN_IMAGES, "5"));
-            timer1.Interval = delayBetweenImages * 1000;
+            string delayStr = registryManager.getRegistryProperty(RegistryConstants.REG_KEY_DELAY_BETWEEN_IMAGES, "10");
+            if (!int.TryParse(delayStr, out delayBetweenImages))
+                delayBetweenImages = 10;
+            int durationIndex;
+            if (!int.TryParse(registryManager.getRegistryProperty(RegistryConstants.REG_KEY_VideoDuration, "2"), out durationIndex))
+                durationIndex = 2;
+            videoDurationSeconds = (durationIndex + 1) * 10;
 
-            this.FormBorderStyle = FormBorderStyle.None;
-            this.Top = screen.Bounds.Top;
-            this.Left = screen.Bounds.Left;
-            this.ClientSize = new System.Drawing.Size(screen.Bounds.Width, screen.Bounds.Height);
-            this.ShowInTaskbar = false;
-            this.TopMost = true;
+            FormBorderStyle = FormBorderStyle.None;
+            Top = screen.Bounds.Top;
+            Left = screen.Bounds.Left;
+            ClientSize = new Size(screen.Bounds.Width, screen.Bounds.Height);
+            ShowInTaskbar = false;
+            TopMost = true;
+            BackColor = Color.Black;
 
-            WriteDebugLog($"Loading settings for screen {screen.DeviceName} at {screen.Bounds}");
-
-            // Load all settings first
             LoadFileNameSettings();
             LoadEffectSettings();
-            LoadImageFiles();
+            imageFolders = registryManager.getImageFolders();
 
-            // Initialize single animation control with all settings
-            InitializeAnimationControl();
-
+            InitializeFrameGrid();
             animationStepInterval = (int)(effectDurationVal * 1000 / animationSteps);
-            timer1_Tick(null, null);
 
-            WriteDebugLog("Screensaver form initialization complete");
+            for (int i = 0; i < frames.Length; i++)
+                NavigateFrameNext(i);
         }
 
-        private void InitializeAnimationControl()
+        private void InitializeFrameGrid()
         {
-            WriteDebugLog("Creating animation control");
+            int frameCount = 1;
+            if (!int.TryParse(registryManager.getRegistryProperty(RegistryConstants.REG_KEY_FRAMES_ON_SCREEN, "1"), out frameCount)
+                || frameCount < 1)
+            {
+                frameCount = 1;
+            }
 
-            animationControl = new AnimationControl();
-            animationControl.Dock = DockStyle.Fill;
+            FrameLayout.GetGridSize(frameCount, out int columns, out int rows);
 
-            // Apply all settings immediately
-            animationControl.AnimationSpeed = effectDurationVal;
-            animationControl.BorderColor = Color.Transparent;
-            animationControl.BackColor = Color.Black;
+            frameGrid = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = columns,
+                RowCount = rows,
+                BackColor = Color.Black
+            };
 
-            // Always set font settings, let control handle visibility
-            animationControl.showFileName = showFileName;
-            animationControl.FileNameFont = fileNameFont;
-            animationControl.FileNameColor = fileNameColor;
-            animationControl.FileNameDisplayMode = fileNameDisplayMode;
+            for (int c = 0; c < columns; c++)
+                frameGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / columns));
+            for (int r = 0; r < rows; r++)
+                frameGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 100f / rows));
 
-            this.Controls.Add(animationControl);
+            frames = new MediaFrameSlot[frameCount];
+            frameTimers = new Timer[frameCount];
+            frameHistories = new FrameMediaHistory[frameCount];
 
-            WriteDebugLog($"Animation control created with settings: ShowFileName={showFileName}, FileNameDisplayMode={fileNameDisplayMode}");
+            bool mute = registryManager.IsVideoMuted();
+
+            for (int i = 0; i < frameCount; i++)
+            {
+                frameHistories[i] = new FrameMediaHistory();
+
+                MediaFrameSlot slot = new MediaFrameSlot { Dock = DockStyle.Fill, Margin = new Padding(1) };
+                slot.ConfigureDisplay(showFileName, fileNameFont, fileNameColor, fileNameDisplayMode);
+                slot.ConfigureVideo(mute, videoDurationSeconds);
+
+                int slotIndex = i;
+                slot.VideoEnded += (s, e) => NavigateFrameNext(slotIndex);
+                slot.VideoStopped += (s, e) =>
+                {
+                    if (activeVideoFrameIndex == slotIndex)
+                        activeVideoFrameIndex = null;
+                    if (!frames[slotIndex].IsVideoActive)
+                        frameTimers[slotIndex].Start();
+                };
+
+                FrameLayout.GetCellPosition(i, columns, out int col, out int row);
+                frameGrid.Controls.Add(slot, col, row);
+                frames[i] = slot;
+
+                Timer frameTimer = new Timer { Interval = delayBetweenImages * 1000 };
+                frameTimer.Tick += (s, e) => NavigateFrameNext(slotIndex);
+                frameTimer.Start();
+                frameTimers[i] = frameTimer;
+            }
+
+            Controls.Add(frameGrid);
+            WriteDebugLog($"Created {frameCount} independent frame(s) on {columns}x{rows} grid");
+        }
+
+        private void NavigateFrameNext(int frameIndex)
+        {
+            if (!CanNavigateFrame(frameIndex)) return;
+
+            // Image delay timer must not advance frames while video is playing.
+            if (frames[frameIndex].IsVideoActive)
+                return;
+
+            string filePath = frameHistories[frameIndex].GoNext(() => PickRandomForFrame(frameIndex));
+            if (string.IsNullOrEmpty(filePath)) return;
+
+            DisplayFileOnFrame(frameIndex, filePath, "next");
+        }
+
+        private void NavigateFramePrevious(int frameIndex)
+        {
+            if (!CanNavigateFrame(frameIndex)) return;
+
+            if (frames[frameIndex].IsVideoActive)
+                return;
+
+            string filePath = frameHistories[frameIndex].GoPrevious(() => PickRandomForFrame(frameIndex));
+            if (string.IsNullOrEmpty(filePath)) return;
+
+            DisplayFileOnFrame(frameIndex, filePath, "previous");
+        }
+
+        private bool CanNavigateFrame(int frameIndex)
+        {
+            if (frames == null || frameHistories == null
+                || frameIndex < 0 || frameIndex >= frames.Length)
+                return false;
+
+            if (mediaCatalog == null || !mediaCatalog.HasMedia)
+            {
+                WriteDebugLog("No media available.");
+                return false;
+            }
+            return true;
+        }
+
+        private string PickRandomForFrame(int frameIndex)
+        {
+            bool screenHasVideo = activeVideoFrameIndex.HasValue;
+            string path = mediaCatalog.PickRandomForFrame(screenHasVideo);
+
+            if (string.IsNullOrEmpty(path)) return null;
+
+            if (MediaCatalog.IsVideoFile(path)
+                && screenHasVideo
+                && activeVideoFrameIndex != frameIndex)
+            {
+                path = mediaCatalog.PickRandomForFrame(true);
+            }
+
+            return path;
+        }
+
+        private void DisplayFileOnFrame(int frameIndex, string filePath, string reason)
+        {
+            if (string.IsNullOrEmpty(filePath)) return;
+
+            if (MediaCatalog.IsVideoFile(filePath))
+            {
+                if (activeVideoFrameIndex.HasValue && activeVideoFrameIndex != frameIndex)
+                {
+                    string fallback = mediaCatalog.PickRandomForFrame(true);
+                    if (string.IsNullOrEmpty(fallback) || MediaCatalog.IsVideoFile(fallback))
+                        return;
+
+                    frameHistories[frameIndex].SetCurrentEntry(fallback);
+                    ShowImageOnFrame(frameIndex, fallback);
+                    frameTimers[frameIndex].Start();
+                    WriteDebugLog($"Frame {frameIndex} ({reason}): image fallback {Path.GetFileName(fallback)}");
+                    return;
+                }
+
+                if (activeVideoFrameIndex == frameIndex)
+                    frames[frameIndex].StopVideoPlayback();
+
+                activeVideoFrameIndex = frameIndex;
+                frames[frameIndex].ShowVideo(filePath);
+                frameTimers[frameIndex].Stop();
+                WriteDebugLog($"Frame {frameIndex} ({reason}): video {Path.GetFileName(filePath)} [history {frameHistories[frameIndex].CurrentIndex + 1}/{frameHistories[frameIndex].Count}]");
+            }
+            else
+            {
+                if (activeVideoFrameIndex == frameIndex)
+                {
+                    frames[frameIndex].StopVideoPlayback();
+                    activeVideoFrameIndex = null;
+                }
+
+                ShowImageOnFrame(frameIndex, filePath);
+                frameTimers[frameIndex].Start();
+                WriteDebugLog($"Frame {frameIndex} ({reason}): image {Path.GetFileName(filePath)} [history {frameHistories[frameIndex].CurrentIndex + 1}/{frameHistories[frameIndex].Count}]");
+            }
+        }
+
+        private void ResetFrameTimer(int frameIndex)
+        {
+            if (frameTimers == null || frameIndex < 0 || frameIndex >= frameTimers.Length)
+                return;
+
+            if (frames[frameIndex].IsVideoActive)
+                return;
+
+            frameTimers[frameIndex].Stop();
+            frameTimers[frameIndex].Start();
+        }
+
+        private void ShowImageOnFrame(int frameIndex, string filePath)
+        {
+            if (!File.Exists(filePath))
+            {
+                ResetSharedCatalog();
+                mediaCatalog = GetSharedCatalog(registryManager);
+                return;
+            }
+
+            frames[frameIndex].ConfigureDisplay(showFileName, fileNameFont, fileNameColor, fileNameDisplayMode);
+            AnimationTypes effect = useEffects ? effectsList.PickRandom() : AnimationTypes.None;
+            frames[frameIndex].ShowImage(filePath, effect, animationStepInterval, effectDurationVal, FormatDisplayName(filePath));
+        }
+
+        private string FormatDisplayName(string filePath)
+        {
+            switch (fileNameDisplayMode)
+            {
+                case 0: return filePath;
+                case 1: return GetRelativePath(filePath);
+                default: return Path.GetFileName(filePath);
+            }
         }
 
         private void LoadFileNameSettings()
         {
-            showFileName = bool.Parse(RegistryManager.GetValue(RegistryConstants.REG_KEY_SHOW_FILENAME, "False"));
-            fileNameDisplayMode = int.Parse(RegistryManager.GetValue(RegistryConstants.REG_KEY_FILENAME_DISPLAY_MODE, "2"));
-            string fontString = RegistryManager.GetValue(RegistryConstants.REG_KEY_FILENAME_FONT, "");
-            string colorString = RegistryManager.GetValue(RegistryConstants.REG_KEY_FILENAME_COLOR, "White");
+            showFileName = registryManager.getBooleanPropertyVal(RegistryConstants.REG_KEY_SHOW_FILENAME, true);
+            if (!int.TryParse(registryManager.getRegistryProperty(RegistryConstants.REG_KEY_FILENAME_DISPLAY_MODE, "2"), out fileNameDisplayMode))
+                fileNameDisplayMode = 2;
 
-            // Always set font and color
+            string fontString = registryManager.getRegistryProperty(RegistryConstants.REG_KEY_FILENAME_FONT, "");
+            string colorString = registryManager.getRegistryProperty(RegistryConstants.REG_KEY_FILENAME_COLOR, "White");
             fileNameFont = !string.IsNullOrEmpty(fontString) ? StringToFont(fontString) : new Font("Arial", 12, FontStyle.Regular);
             fileNameColor = !string.IsNullOrEmpty(colorString) ? ColorTranslator.FromHtml(colorString) : Color.White;
         }
 
         private void LoadEffectSettings()
         {
-            // In normal preview flow we get this from Settings form.
-            // In /s screensaver mode parent is null, so read from registry.
-            if (parent != null)
-            {
-                useEffects = parent.UseTransitions;
-            }
-            else
-            {
-                useEffects = registryManager.getBooleanPropertyVal(RegistryConstants.REG_KEY_USE_EFFECTS, true);
-            }
-            effectDurationVal = float.Parse(RegistryManager.GetValue(RegistryConstants.REG_KEY_EFFECT_DURATION, "2"));
+            useEffects = registryManager.getBooleanPropertyVal(RegistryConstants.REG_KEY_USE_EFFECTS, true);
 
-            // Clear existing effects list
+            string durationStr = registryManager.getRegistryProperty(RegistryConstants.REG_KEY_EFFECT_DURATION, "1");
+            if (!float.TryParse(durationStr, out effectDurationVal))
+                effectDurationVal = 1f;
             effectsList.Clear();
 
-            // Only load effects list if transitions are enabled
             if (useEffects)
             {
-                string effectsStr = RegistryManager.GetValue(RegistryConstants.REG_KEY_EFFECTS, "");
+                string effectsStr = registryManager.getRegistryProperty(RegistryConstants.REG_KEY_EFFECTS, "");
                 if (!string.IsNullOrEmpty(effectsStr))
                 {
-                    string[] effects = effectsStr.Split(';');
-                    foreach (string effect in effects)
+                    foreach (string effect in effectsStr.Split(';'))
                     {
                         if (Enum.TryParse(effect, out AnimationTypes animationType))
-                        {
                             effectsList.Add(animationType);
-                        }
                     }
                 }
             }
 
-            // If transitions are disabled or no effects were loaded, use None
             if (!useEffects || effectsList.Count == 0)
             {
                 effectsList.Clear();
@@ -192,300 +352,80 @@ namespace ScreenSaver
             }
         }
 
-        private void LoadImageFiles()
-        {
-            images.Clear();
-            imageHistory = new List<string>();
-
-            // Get folders from registry
-            imageFolders = registryManager.getImageFolders();
-
-            // If no folders configured, add user's Pictures folder as default
-            if (imageFolders.Count == 0)
-            {
-                string picturesPath = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
-                if (Directory.Exists(picturesPath))
-                {
-                    WriteDebugLog($"No folders configured, adding default Pictures folder: {picturesPath}");
-                    imageFolders.Add(picturesPath, false); // Add without subfolders by default
-                }
-            }
-
-            // Get selected file types from registry
-            string fileTypes = registryManager.getRegistryProperty(RegistryConstants.REG_KEY_FILE_TYPES);
-            if (string.IsNullOrEmpty(fileTypes))
-            {
-                fileTypes = "*.jpg;*.jpeg;*.png;*.bmp;*.gif"; // Default file types if none selected
-            }
-            string[] supportedExtensions = fileTypes.Split(';');
-
-            HashSet<string> uniqueImages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            // Load files from each folder
-            foreach (KeyValuePair<string, bool> folderEntry in imageFolders)
-            {
-                string folder = folderEntry.Key;
-                bool includeSubfolders = folderEntry.Value;
-
-                if (Directory.Exists(folder))
-                {
-                    try
-                    {
-                        foreach (string extension in supportedExtensions)
-                        {
-                            SearchOption searchOption = includeSubfolders ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
-                            foreach (string imagePath in Directory.EnumerateFiles(folder, extension, searchOption))
-                            {
-                                uniqueImages.Add(imagePath);
-                            }
-                        }
-                    }
-                    catch (UnauthorizedAccessException ex)
-                    {
-                        WriteDebugLog($"Error accessing folder {folder}: {ex.Message}");
-                        Console.WriteLine($"Error accessing folder {folder}: {ex.Message}");
-                    }
-                    catch (DirectoryNotFoundException ex)
-                    {
-                        WriteDebugLog($"Error accessing folder {folder}: {ex.Message}");
-                        Console.WriteLine($"Error accessing folder {folder}: {ex.Message}");
-                    }
-                }
-                else
-                {
-                    WriteDebugLog($"{folder} doesn't exists");
-                }
-            }
-
-            images = uniqueImages.ToList();
-
-            //check for empty list
-            imagesCount = images.Count;
-            if (imagesCount == 0)
-            {
-                WriteDebugLog("No images found in configured folders, using embedded resources");
-
-                // Get all embedded resources
-                var assembly = System.Reflection.Assembly.GetExecutingAssembly();
-                var resourceNames = assembly.GetManifestResourceNames()
-                    .Where(name => name.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase));
-
-                foreach (string resourceName in resourceNames)
-                {
-                    try
-                    {
-                        using (var stream = assembly.GetManifestResourceStream(resourceName))
-                        using (var image = Image.FromStream(stream))
-                        {
-                            // Generate a unique temp filename for each instance
-                            string tempPath = Path.Combine(
-                                Path.GetTempPath(),
-                                $"screensaver_resource_{Guid.NewGuid()}_{Path.GetFileName(resourceName)}"
-                            );
-                            image.Save(tempPath, System.Drawing.Imaging.ImageFormat.Jpeg);
-                            images.Add(tempPath);
-                            WriteDebugLog($"Added embedded resource: {resourceName} to {tempPath}");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        WriteDebugLog($"Error loading embedded resource {resourceName}: {ex.Message}");
-                    }
-                }
-
-            }
-
-            // Randomize the list
-            Random rnd = new Random();
-            for (int i = images.Count - 1; i > 0; i--)
-            {
-                int j = rnd.Next(i + 1);
-                string temp = images[i];
-                images[i] = images[j];
-                images[j] = temp;
-            }
-        }
-
-        private void timer1_Tick(object sender, EventArgs e)
-        {
-            ShowNextImage();
-        }
-
-        private void ShowNextImage()
-        {
-            if (images == null || !images.Any())
-            {
-                WriteDebugLog("No images available to display.");
-                return;
-            }
-
-            string fileName;
-
-            // If we're not at the end of the history, move forward in history
-            if (currentImageIndex < imageHistory.Count - 1)
-            {
-                currentImageIndex++;
-                fileName = imageHistory[currentImageIndex];
-            }
-            else
-            {
-                // Load a new random image and add to history
-                fileName = images.PickRandom();
-
-                // Ensure it's different from the currently displayed image
-                while (imageHistory.Count > 0 && fileName == imageHistory.Last() && images.Count > 1)
-                    fileName = images.PickRandom();
-
-                imageHistory.Add(fileName);
-                currentImageIndex = imageHistory.Count - 1;
-
-                // Limit history size
-                if (imageHistory.Count > MAX_HISTORY_SIZE)
-                {
-                    imageHistory.RemoveAt(0);
-                    currentImageIndex--; // Adjust the index accordingly
-                }
-            }
-
-            DisplayImage(fileName);
-
-        }
-
-        private void DisplayImage(string fileName)
-        {
-            if (!File.Exists(fileName))
-            {
-                WriteDebugLog($"Image file not found: {fileName}, reloading images.");
-                LoadImageFiles();
-                return;
-            }
-
-            try
-            {
-                AnimationTypes selectedEffect = useEffects ? effectsList.PickRandom() : AnimationTypes.None;
-                animationControl.AnimationType = selectedEffect;
-
-                Bitmap bmp = new Bitmap(fileName);
-                animationControl.AnimatedImage = bmp;
-
-                string displayName;
-                switch (fileNameDisplayMode)
-                {
-                    case 0: displayName = fileName; break;
-                    case 1: displayName = GetRelativePath(fileName); break;
-                    case 2: displayName = Path.GetFileName(fileName); break;
-                    default: displayName = fileName; break;
-                }
-
-                animationControl.imageName = displayName;
-                animationControl.Animate(animationStepInterval);
-            }
-            catch (Exception ex)
-            {
-                WriteDebugLog($"Error displaying image {fileName}: {ex.Message}");
-                images.Remove(fileName);
-                imageHistory.Remove(fileName);
-                if (currentImageIndex >= imageHistory.Count)
-                    currentImageIndex = imageHistory.Count - 1;
-                ShowNextImage();
-            }
-        }
-
-
         private void Form1_Load(object sender, EventArgs e)
         {
-            timer1_Tick(null, null);
-            timer1.Enabled = true;
         }
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
             if ((DateTime.Now - lastKeyPressTime) < KEY_PRESS_DELAY)
-            {
-                // Too soon since the last key press, ignore this key
                 return true;
-            }
-            lastKeyPressTime = DateTime.Now; // Update last key press time
+            lastKeyPressTime = DateTime.Now;
 
             switch (keyData)
             {
                 case Keys.Back:
                 case Keys.Left:
-                    //reset timer
-                    timer1.Stop();
-                    timer1.Start();
-                    ShowPreviousImage();
+                    if (frames != null)
+                    {
+                        for (int i = 0; i < frames.Length; i++)
+                        {
+                            NavigateFramePrevious(i);
+                            ResetFrameTimer(i);
+                        }
+                    }
                     return true;
                 case Keys.Next:
                 case Keys.Right:
-                    timer1.Stop();
-                    timer1.Start();
-                    ShowNextImage();
+                    if (frames != null)
+                    {
+                        for (int i = 0; i < frames.Length; i++)
+                        {
+                            NavigateFrameNext(i);
+                            ResetFrameTimer(i);
+                        }
+                    }
                     return true;
                 case Keys.Escape:
                     if (isPreviewMode)
                     {
-                        this.Close();
+                        Close();
                         Application.Exit();
+                    }
+                    else if (parent != null)
+                    {
+                        parent.CloseAllFrames();
                     }
                     else
                     {
-                        if (parent != null)
-                        {
-                            parent.CloseAllFrames();
-                        }
-                        else
-                        {
-                            Application.Exit();
-                        }
+                        Application.Exit();
                     }
                     return true;
                 default:
-                    return true; //ignore any other key pressed
-            }
-        }
-
-        private void ShowPreviousImage()
-        {
-            if (currentImageIndex > 0)
-            {
-                currentImageIndex--;
-                string fileName = imageHistory[currentImageIndex];
-                DisplayImage(fileName);
+                    return true;
             }
         }
 
         private void Form1_Resize(object sender, EventArgs e)
         {
             if (!isPreviewMode && screen != null)
-            {
-                this.Bounds = screen.Bounds;
-            }
+                Bounds = screen.Bounds;
         }
 
         private void Form1_Shown(object sender, EventArgs e)
         {
-            if (isPreviewMode) { return; }
+            if (isPreviewMode) return;
 
             try
             {
-                Screen actualScreen = Screen.FromHandle(this.Handle);
-
-                // If Windows attached this form to a different monitor than expected, align to actual.
+                Screen actualScreen = Screen.FromHandle(Handle);
                 if (screen == null || !screen.DeviceName.Equals(actualScreen.DeviceName, StringComparison.OrdinalIgnoreCase))
-                {
                     screen = actualScreen;
-                }
-
-                this.Bounds = screen.Bounds;
-                if (isPreviewMode)
-                {
-                    WriteDebugLog($"Preview shown: AssignedScreen={screen.DeviceName}, HandleScreen={actualScreen.DeviceName}, Bounds={this.Bounds}, Visible={this.Visible}");
-                }
+                Bounds = screen.Bounds;
             }
             catch (Exception ex)
             {
-                WriteDebugLog($"Form1_Shown error while mapping handle screen: {ex.Message}");
+                WriteDebugLog($"Form1_Shown error: {ex.Message}");
             }
         }
 
@@ -494,17 +434,11 @@ namespace ScreenSaver
             try
             {
                 string[] parts = fontString.Split(';');
-
                 if (parts.Length < 3)
                     throw new ArgumentException("Invalid font string format.");
-
-                string fontFamily = parts[0];
-                float fontSize = float.Parse(parts[1]);
-
                 if (!Enum.TryParse(parts[2], true, out FontStyle style))
                     style = FontStyle.Regular;
-
-                return new Font(fontFamily, fontSize, style);
+                return new Font(parts[0], float.Parse(parts[1]), style);
             }
             catch
             {
@@ -515,13 +449,9 @@ namespace ScreenSaver
         public void UpdateFontSettings()
         {
             LoadFileNameSettings();
-            if (animationControl != null)
-            {
-                animationControl.showFileName = showFileName;
-                animationControl.FileNameFont = fileNameFont;
-                animationControl.FileNameColor = fileNameColor;
-                animationControl.FileNameDisplayMode = fileNameDisplayMode;
-            }
+            if (frames == null) return;
+            foreach (MediaFrameSlot slot in frames)
+                slot.ConfigureDisplay(showFileName, fileNameFont, fileNameColor, fileNameDisplayMode);
         }
 
         private string GetRelativePath(string fullPath)
@@ -533,13 +463,11 @@ namespace ScreenSaver
             {
                 string bestMatch = null;
                 int bestMatchLength = -1;
-
                 fullPath = Path.GetFullPath(fullPath);
 
                 foreach (var folderEntry in imageFolders)
                 {
                     string baseFolder = Path.GetFullPath(folderEntry.Key.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar);
-
                     if (fullPath.StartsWith(baseFolder, StringComparison.OrdinalIgnoreCase)
                         && baseFolder.Length > bestMatchLength)
                     {
@@ -548,35 +476,29 @@ namespace ScreenSaver
                     }
                 }
 
-                if (bestMatch != null)
-                {
-                    string relativePath = fullPath.Substring(bestMatchLength);
-                    return relativePath;
-                }
-                else
-                {
-                    // If no matching folder is found, return the absolute path
-                    return fullPath;
-                }
+                return bestMatch != null ? fullPath.Substring(bestMatchLength) : fullPath;
             }
             catch
             {
-                // Return absolute path on error
                 return fullPath;
             }
-        }
-
-        protected override void OnFormClosing(FormClosingEventArgs e)
-        {
-            WriteDebugLog($"Form closing (Preview: {isPreviewMode})");
-            base.OnFormClosing(e);
         }
 
         protected override void Dispose(bool disposing)
         {
             if (disposing)
             {
-                WriteDebugLog($"Disposing form resources (Preview: {isPreviewMode})");
+                if (frameTimers != null)
+                {
+                    foreach (Timer t in frameTimers)
+                    {
+                        if (t != null)
+                        {
+                            t.Stop();
+                            t.Dispose();
+                        }
+                    }
+                }
                 if (components != null)
                     components.Dispose();
             }
