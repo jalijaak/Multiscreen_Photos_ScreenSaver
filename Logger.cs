@@ -8,6 +8,8 @@ public static class Logger
     private const string LOG_FILE_NAME = "JJ_screensaver_debug.log";
     private static readonly string LOG_FILE_PATH = Path.Combine(Path.GetTempPath(), LOG_FILE_NAME);
 
+    public static string DebugLogFilePath => LOG_FILE_PATH;
+
     /// <summary>
     /// Writes a debug log message to a file, automatically including the caller's method name and line number.
     /// </summary>

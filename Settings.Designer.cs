@@ -63,6 +63,7 @@
             this.toolStripStatusLabel = new System.Windows.Forms.ToolStripLabel();
             this.fontDialog1 = new System.Windows.Forms.FontDialog();
             this.cbx_debug = new System.Windows.Forms.CheckBox();
+            this.linkDebugLog = new System.Windows.Forms.LinkLabel();
             this.toolTip1 = new System.Windows.Forms.ToolTip(this.components);
             this.tabControl1.SuspendLayout();
             this.ImageFolders.SuspendLayout();
@@ -598,12 +599,28 @@
             this.cbx_debug.Text = "Debug";
             this.toolTip1.SetToolTip(this.cbx_debug, "Save debug info to log in user temp folder");
             this.cbx_debug.UseVisualStyleBackColor = true;
+            this.cbx_debug.CheckedChanged += new System.EventHandler(this.cbx_debug_CheckedChanged);
+            // 
+            // linkDebugLog
+            // 
+            this.linkDebugLog.ActiveLinkColor = System.Drawing.Color.RoyalBlue;
+            this.linkDebugLog.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
+            this.linkDebugLog.AutoSize = true;
+            this.linkDebugLog.Location = new System.Drawing.Point(80, 410);
+            this.linkDebugLog.Name = "linkDebugLog";
+            this.linkDebugLog.Size = new System.Drawing.Size(130, 13);
+            this.linkDebugLog.TabIndex = 6;
+            this.linkDebugLog.TabStop = true;
+            this.linkDebugLog.Text = "JJ_screensaver_debug.log";
+            this.linkDebugLog.Visible = false;
+            this.linkDebugLog.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.linkDebugLog_LinkClicked);
             // 
             // Settings
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(603, 463);
+            this.Controls.Add(this.linkDebugLog);
             this.Controls.Add(this.cbx_debug);
             this.Controls.Add(this.toolStrip1);
             this.Controls.Add(this.btnPreview);
@@ -676,6 +693,7 @@
         private System.Windows.Forms.Label labelFileNameSample;
         private System.Windows.Forms.Label labelFileNameDisplay;
         private System.Windows.Forms.CheckBox cbx_debug;
+        private System.Windows.Forms.LinkLabel linkDebugLog;
         private System.Windows.Forms.ToolTip toolTip1;
         private System.Windows.Forms.Label label6;
         private System.Windows.Forms.RichTextBox richTextBox2;

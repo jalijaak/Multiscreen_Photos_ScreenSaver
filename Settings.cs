@@ -6,6 +6,7 @@ using System.Drawing;
 using System.Text;
 using System.Windows.Forms;
 using System.IO;
+using System.Diagnostics;
 using Microsoft.Win32;
 
 namespace ScreenSaver
@@ -154,6 +155,7 @@ namespace ScreenSaver
 
                 // Update UI visibility based on loaded settings
                 UpdateUIVisibility();
+                UpdateDebugLogLinkVisibility();
             }
             catch (Exception ex)
             {
@@ -558,6 +560,43 @@ namespace ScreenSaver
         private void cbx_UseVideo_CheckedChanged(object sender, EventArgs e)
         {
             UpdateUIVisibility();
+        }
+
+        private void cbx_debug_CheckedChanged(object sender, EventArgs e)
+        {
+            UpdateDebugLogLinkVisibility();
+        }
+
+        private void UpdateDebugLogLinkVisibility()
+        {
+            bool debugActive = cbx_debug.Checked;
+            linkDebugLog.Visible = debugActive;
+            if (!debugActive) return;
+
+            linkDebugLog.Text = Path.GetFileName(Logger.DebugLogFilePath);
+            toolTip1.SetToolTip(linkDebugLog, Logger.DebugLogFilePath);
+        }
+
+        private void linkDebugLog_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
+        {
+            try
+            {
+                string logPath = Logger.DebugLogFilePath;
+                if (File.Exists(logPath))
+                {
+                    Process.Start(new ProcessStartInfo(logPath) { UseShellExecute = true });
+                    return;
+                }
+
+                Process.Start(new ProcessStartInfo(Path.GetDirectoryName(logPath)) { UseShellExecute = true });
+                toolStripStatusLabel.Text = "Debug log not created yet. Temp folder opened.";
+                toolStripStatusLabel.ForeColor = SystemColors.GrayText;
+            }
+            catch (Exception ex)
+            {
+                toolStripStatusLabel.Text = "Could not open debug log: " + ex.Message;
+                toolStripStatusLabel.ForeColor = Color.Red;
+            }
         }
 
         private static bool IsVideoExtension(string extension)
