@@ -8,8 +8,10 @@ namespace ScreenSaver
     internal class MediaFrameSlot : Panel
     {
         private readonly AnimationControl imageControl;
+        private readonly Label fileNameLabel;
         private AxWMPLib.AxWindowsMediaPlayer videoPlayer;
         private bool videoPlayerInitialized;
+        private bool showFileName;
         private bool isVideoActive;
         private bool videoMuted = true;
         private int videoClipLengthSeconds = 30;
@@ -17,6 +19,7 @@ namespace ScreenSaver
         private DateTime videoPlayStartTime = DateTime.MinValue;
         private Timer videoDurationTimer;
         private string currentVideoPath;
+        private string currentVideoDisplayName;
         private bool videoEndSignaled;
 
         public event EventHandler VideoEnded;
@@ -36,14 +39,33 @@ namespace ScreenSaver
                 BorderColor = Color.Transparent
             };
             Controls.Add(imageControl);
+
+            fileNameLabel = new Label
+            {
+                AutoSize = true,
+                BackColor = Color.Black,
+                Location = new Point(10, 10),
+                Visible = false,
+                Padding = new Padding(4, 2, 4, 2)
+            };
+            Controls.Add(fileNameLabel);
         }
 
         public void ConfigureDisplay(bool showFileName, Font fileNameFont, Color fileNameColor, int fileNameDisplayMode)
         {
+            this.showFileName = showFileName;
             imageControl.showFileName = showFileName;
             imageControl.FileNameFont = fileNameFont;
             imageControl.FileNameColor = fileNameColor;
             imageControl.FileNameDisplayMode = fileNameDisplayMode;
+
+            fileNameLabel.Font = fileNameFont;
+            fileNameLabel.ForeColor = fileNameColor;
+
+            if (isVideoActive && !string.IsNullOrEmpty(currentVideoDisplayName))
+                UpdateVideoFileNameLabel(currentVideoDisplayName);
+            else
+                fileNameLabel.Visible = false;
         }
 
         public void ConfigureVideo(bool mute, int clipLengthSeconds)
@@ -56,6 +78,7 @@ namespace ScreenSaver
         public void ShowImage(string filePath, AnimationTypes effect, int animationStepInterval, float effectDuration, string displayName = null)
         {
             StopVideoPlayback();
+            ClearAnimatedImage();
 
             if (!File.Exists(filePath)) return;
 
@@ -78,22 +101,32 @@ namespace ScreenSaver
             }
         }
 
-        public void ShowVideo(string filePath)
+        public void ShowVideo(string filePath, string displayName = null)
         {
             if (!File.Exists(filePath)) return;
 
             EnsureVideoPlayer();
+            ClearAnimatedImage();
             imageControl.Visible = false;
+            currentVideoDisplayName = displayName ?? Path.GetFileName(filePath);
+            UpdateVideoFileNameLabel(currentVideoDisplayName);
+
+            if (isVideoActive)
+            {
+                try { videoPlayer.Ctlcontrols.stop(); } catch { }
+            }
 
             currentVideoPath = filePath;
             isVideoActive = true;
-            videoPlayer.Visible = true;
-            videoPlayer.BringToFront();
             videoEndSignaled = false;
             effectiveMaxPlaySeconds = videoClipLengthSeconds;
             videoPlayStartTime = DateTime.MinValue;
 
             videoPlayer.URL = filePath;
+            videoPlayer.Visible = true;
+            videoPlayer.BringToFront();
+            if (fileNameLabel.Visible)
+                fileNameLabel.BringToFront();
             videoPlayer.Ctlcontrols.play();
             ApplyMuteSettings();
             StartVideoDurationTimer();
@@ -105,23 +138,37 @@ namespace ScreenSaver
 
             isVideoActive = false;
             currentVideoPath = null;
+            currentVideoDisplayName = null;
             videoPlayStartTime = DateTime.MinValue;
             videoEndSignaled = false;
 
             if (videoDurationTimer != null)
-            {
                 videoDurationTimer.Stop();
-            }
 
-            if (videoPlayer != null)
-            {
-                videoPlayer.Ctlcontrols.stop();
-                videoPlayer.Visible = false;
-            }
+            ReleaseWmpPlayback();
+            HideVideoFileNameLabel();
 
             imageControl.Visible = true;
             imageControl.BringToFront();
             VideoStopped?.Invoke(this, EventArgs.Empty);
+        }
+
+        private void ReleaseWmpPlayback()
+        {
+            if (videoPlayer == null) return;
+
+            try { videoPlayer.Ctlcontrols.stop(); } catch { }
+            try { videoPlayer.close(); } catch { }
+
+            videoPlayer.Visible = false;
+        }
+
+        private void ClearAnimatedImage()
+        {
+            if (imageControl.AnimatedImage == null) return;
+
+            imageControl.AnimatedImage.Dispose();
+            imageControl.AnimatedImage = null;
         }
 
         private void EnsureVideoPlayer()
@@ -133,16 +180,30 @@ namespace ScreenSaver
             videoPlayer.Dock = DockStyle.Fill;
             videoPlayer.Enabled = true;
             videoPlayer.PlayStateChange += VideoPlayer_PlayStateChange;
+            videoPlayer.ClickEvent += VideoPlayer_ClickEvent;
             Controls.Add(videoPlayer);
             ((System.ComponentModel.ISupportInitialize)(videoPlayer)).EndInit();
 
             videoPlayer.enableContextMenu = false;
             videoPlayer.uiMode = "none";
             videoPlayer.Visible = false;
+            videoPlayer.Cursor = Cursors.Hand;
             videoPlayerInitialized = true;
 
             videoDurationTimer = new Timer { Interval = 1000 };
             videoDurationTimer.Tick += VideoDurationTimer_Tick;
+        }
+
+        private void VideoPlayer_ClickEvent(object sender, AxWMPLib._WMPOCXEvents_ClickEvent e)
+        {
+            if (!isVideoActive) return;
+            ToggleVideoMute();
+        }
+
+        private void ToggleVideoMute()
+        {
+            videoMuted = !videoMuted;
+            ApplyMuteSettings();
         }
 
         private void StartVideoDurationTimer()
@@ -207,7 +268,36 @@ namespace ScreenSaver
             if (videoDurationTimer != null)
                 videoDurationTimer.Stop();
 
+            // End playback before notifying so coordinators see IsVideoActive=false.
+            ReleaseWmpPlayback();
+            isVideoActive = false;
+            currentVideoPath = null;
+            currentVideoDisplayName = null;
+            videoPlayStartTime = DateTime.MinValue;
+            HideVideoFileNameLabel();
+            imageControl.Visible = true;
+            imageControl.BringToFront();
+
             VideoEnded?.Invoke(this, EventArgs.Empty);
+        }
+
+        private void UpdateVideoFileNameLabel(string displayName)
+        {
+            if (!showFileName || string.IsNullOrEmpty(displayName))
+            {
+                fileNameLabel.Visible = false;
+                return;
+            }
+
+            fileNameLabel.Text = displayName;
+            fileNameLabel.Location = new Point(10, 10);
+            fileNameLabel.Visible = true;
+        }
+
+        private void HideVideoFileNameLabel()
+        {
+            fileNameLabel.Visible = false;
+            fileNameLabel.Text = string.Empty;
         }
 
         private void ApplyMuteSettings()
@@ -227,9 +317,9 @@ namespace ScreenSaver
                     videoDurationTimer.Dispose();
                 }
                 if (videoPlayer != null)
-                {
                     videoPlayer.Dispose();
-                }
+                if (fileNameLabel != null)
+                    fileNameLabel.Dispose();
             }
             base.Dispose(disposing);
         }

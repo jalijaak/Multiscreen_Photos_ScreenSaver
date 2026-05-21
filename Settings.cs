@@ -639,6 +639,8 @@ namespace ScreenSaver
                 previewForms.Add(form);
             }
 
+            Form1.EnforceGlobalSingleVideoPlayback();
+
             if (destroyOnClose && previewForms.Count > 0)
             {
                 Application.Run(previewForms[0]);

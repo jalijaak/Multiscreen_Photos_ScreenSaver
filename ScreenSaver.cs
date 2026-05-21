@@ -102,6 +102,7 @@ namespace ScreenSaver
                         Logger.WriteDebugLog($"Preview host rect available={hasPreviewRect}");
                     }
 
+                    Form1.ResetSharedCatalog();
                     Form previewForm = new Form1(settings, Screen.PrimaryScreen, true);
                     previewForm.FormBorderStyle = FormBorderStyle.None;
                     previewForm.StartPosition = FormStartPosition.Manual;
@@ -306,6 +307,8 @@ namespace ScreenSaver
                 activeForms.Add(form);
                 form.Show();
             }
+
+            Form1.EnforceGlobalSingleVideoPlayback();
         }
 
         private static int GetScreenDisplayNumber(Screen screen)

@@ -11,6 +11,8 @@ namespace ScreenSaver
     {
         private static MediaCatalog sharedCatalog;
         private static readonly object CatalogLock = new object();
+        private static readonly object LiveFormsLock = new object();
+        private static readonly List<WeakReference<Form1>> liveForms = new List<WeakReference<Form1>>();
 
         private bool isDebugMode;
         private RegistryManager registryManager;
@@ -49,6 +51,125 @@ namespace ScreenSaver
             }
         }
 
+        public static void EnforceGlobalSingleVideoPlayback()
+        {
+            lock (LiveFormsLock)
+            {
+                PruneLiveForms();
+                Form1 keeperForm = null;
+                int keeperFrame = -1;
+
+                foreach (WeakReference<Form1> wr in liveForms)
+                {
+                    if (!wr.TryGetTarget(out Form1 form) || form.frames == null)
+                        continue;
+
+                    for (int i = 0; i < form.frames.Length; i++)
+                    {
+                        if (!form.frames[i].IsVideoActive)
+                            continue;
+
+                        if (keeperForm == null)
+                        {
+                            keeperForm = form;
+                            keeperFrame = i;
+                            form.activeVideoFrameIndex = i;
+                        }
+                        else
+                        {
+                            form.frames[i].StopVideoPlayback();
+                            if (form.activeVideoFrameIndex == i)
+                                form.activeVideoFrameIndex = null;
+                        }
+                    }
+                }
+            }
+        }
+
+        private static void RegisterLiveForm(Form1 form)
+        {
+            lock (LiveFormsLock)
+            {
+                PruneLiveForms();
+                liveForms.Add(new WeakReference<Form1>(form));
+            }
+        }
+
+        private static void UnregisterLiveForm(Form1 form)
+        {
+            lock (LiveFormsLock)
+            {
+                for (int i = liveForms.Count - 1; i >= 0; i--)
+                {
+                    if (!liveForms[i].TryGetTarget(out Form1 live) || live == form)
+                        liveForms.RemoveAt(i);
+                }
+            }
+        }
+
+        private static void PruneLiveForms()
+        {
+            for (int i = liveForms.Count - 1; i >= 0; i--)
+            {
+                if (!liveForms[i].TryGetTarget(out _))
+                    liveForms.RemoveAt(i);
+            }
+        }
+
+        private static void StopVideoOnOtherForms(Form1 exceptForm)
+        {
+            lock (LiveFormsLock)
+            {
+                PruneLiveForms();
+                foreach (WeakReference<Form1> wr in liveForms)
+                {
+                    if (!wr.TryGetTarget(out Form1 form) || form == exceptForm)
+                        continue;
+
+                    form.StopAllFrameVideo();
+                }
+            }
+        }
+
+        private void StopAllFrameVideo()
+        {
+            if (frames == null) return;
+
+            for (int i = 0; i < frames.Length; i++)
+            {
+                if (frames[i].IsVideoActive)
+                    frames[i].StopVideoPlayback();
+            }
+
+            activeVideoFrameIndex = null;
+        }
+
+        private bool IsAnotherFormPlayingVideo()
+        {
+            lock (LiveFormsLock)
+            {
+                PruneLiveForms();
+                foreach (WeakReference<Form1> wr in liveForms)
+                {
+                    if (wr.TryGetTarget(out Form1 form) && form != this && form.HasActiveVideoFrame())
+                        return true;
+                }
+            }
+            return false;
+        }
+
+        private bool HasActiveVideoFrame()
+        {
+            if (frames == null) return false;
+
+            for (int i = 0; i < frames.Length; i++)
+            {
+                if (frames[i].IsVideoActive)
+                    return true;
+            }
+            return false;
+        }
+
         private static MediaCatalog GetSharedCatalog(RegistryManager registryManager)
         {
             lock (CatalogLock)
@@ -84,7 +205,6 @@ namespace ScreenSaver
             this.parent = parent;
             this.isPreviewMode = isPreview;
 
-            ResetSharedCatalog();
             mediaCatalog = GetSharedCatalog(registryManager);
 
             string delayStr = registryManager.getRegistryProperty(RegistryConstants.REG_KEY_DELAY_BETWEEN_IMAGES, "10");
@@ -107,11 +227,15 @@ namespace ScreenSaver
             LoadEffectSettings();
             imageFolders = registryManager.getImageFolders();
 
+            RegisterLiveForm(this);
+
             InitializeFrameGrid();
             animationStepInterval = (int)(effectDurationVal * 1000 / animationSteps);
 
             for (int i = 0; i < frames.Length; i++)
                 NavigateFrameNext(i);
+
+            EnforceSingleVideoPlayback();
         }
 
         private void InitializeFrameGrid()
@@ -153,7 +277,7 @@ namespace ScreenSaver
                 slot.ConfigureVideo(mute, videoDurationSeconds);
 
                 int slotIndex = i;
-                slot.VideoEnded += (s, e) => NavigateFrameNext(slotIndex);
+                slot.VideoEnded += (s, e) => OnVideoEnded(slotIndex);
                 slot.VideoStopped += (s, e) =>
                 {
                     if (activeVideoFrameIndex == slotIndex)
@@ -176,13 +300,31 @@ namespace ScreenSaver
             WriteDebugLog($"Created {frameCount} independent frame(s) on {columns}x{rows} grid");
         }
 
-        private void NavigateFrameNext(int frameIndex)
+        private void OnVideoEnded(int frameIndex)
+        {
+            if (activeVideoFrameIndex == frameIndex)
+                activeVideoFrameIndex = null;
+
+            // Always finalize; SignalVideoEnded may have already stopped WMP but not raised VideoStopped.
+            frames[frameIndex].StopVideoPlayback();
+
+            NavigateFrameNext(frameIndex);
+        }
+
+        private void NavigateFrameNext(int frameIndex, bool userInitiated = false)
         {
             if (!CanNavigateFrame(frameIndex)) return;
 
-            // Image delay timer must not advance frames while video is playing.
+            SyncActiveVideoFrameIndex();
+
+            // Timer must not advance while video is playing; arrow keys may browse history.
             if (frames[frameIndex].IsVideoActive)
-                return;
+            {
+                if (!userInitiated)
+                    return;
+
+                StopVideoForUserNavigation(frameIndex);
+            }
 
             string filePath = frameHistories[frameIndex].GoNext(() => PickRandomForFrame(frameIndex));
             if (string.IsNullOrEmpty(filePath)) return;
@@ -190,17 +332,32 @@ namespace ScreenSaver
             DisplayFileOnFrame(frameIndex, filePath, "next");
         }
 
-        private void NavigateFramePrevious(int frameIndex)
+        private void NavigateFramePrevious(int frameIndex, bool userInitiated = false)
         {
             if (!CanNavigateFrame(frameIndex)) return;
 
+            SyncActiveVideoFrameIndex();
+
             if (frames[frameIndex].IsVideoActive)
-                return;
+            {
+                if (!userInitiated)
+                    return;
+
+                StopVideoForUserNavigation(frameIndex);
+            }
 
             string filePath = frameHistories[frameIndex].GoPrevious(() => PickRandomForFrame(frameIndex));
             if (string.IsNullOrEmpty(filePath)) return;
 
             DisplayFileOnFrame(frameIndex, filePath, "previous");
+        }
+
+        private void StopVideoForUserNavigation(int frameIndex)
+        {
+            if (activeVideoFrameIndex == frameIndex)
+                activeVideoFrameIndex = null;
+
+            frames[frameIndex].StopVideoPlayback();
         }
 
         private bool CanNavigateFrame(int frameIndex)
@@ -219,7 +376,8 @@ namespace ScreenSaver
 
         private string PickRandomForFrame(int frameIndex)
         {
-            bool screenHasVideo = activeVideoFrameIndex.HasValue;
+            SyncActiveVideoFrameIndex();
+            bool screenHasVideo = activeVideoFrameIndex.HasValue || IsAnotherFormPlayingVideo();
             string path = mediaCatalog.PickRandomForFrame(screenHasVideo);
 
             if (string.IsNullOrEmpty(path)) return null;
@@ -238,13 +396,34 @@ namespace ScreenSaver
         {
             if (string.IsNullOrEmpty(filePath)) return;
 
+            SyncActiveVideoFrameIndex();
+
             if (MediaCatalog.IsVideoFile(filePath))
             {
+                if (IsAnotherFormPlayingVideo())
+                {
+                    string fallback = mediaCatalog.PickRandomForFrame(true);
+                    if (string.IsNullOrEmpty(fallback) || MediaCatalog.IsVideoFile(fallback))
+                    {
+                        WriteDebugLog($"Frame {frameIndex} ({reason}): video blocked, another screen is playing video");
+                        return;
+                    }
+
+                    frameHistories[frameIndex].SetCurrentEntry(fallback);
+                    ShowImageOnFrame(frameIndex, fallback);
+                    frameTimers[frameIndex].Start();
+                    WriteDebugLog($"Frame {frameIndex} ({reason}): image fallback (video on another screen) {Path.GetFileName(fallback)}");
+                    return;
+                }
+
                 if (activeVideoFrameIndex.HasValue && activeVideoFrameIndex != frameIndex)
                 {
                     string fallback = mediaCatalog.PickRandomForFrame(true);
                     if (string.IsNullOrEmpty(fallback) || MediaCatalog.IsVideoFile(fallback))
+                    {
+                        WriteDebugLog($"Frame {frameIndex} ({reason}): video blocked, no image fallback");
                         return;
+                    }
 
                     frameHistories[frameIndex].SetCurrentEntry(fallback);
                     ShowImageOnFrame(frameIndex, fallback);
@@ -253,26 +432,73 @@ namespace ScreenSaver
                     return;
                 }
 
-                if (activeVideoFrameIndex == frameIndex)
-                    frames[frameIndex].StopVideoPlayback();
-
+                StopVideoOnOtherForms(this);
+                StopVideoOnAllFramesExcept(frameIndex);
                 activeVideoFrameIndex = frameIndex;
-                frames[frameIndex].ShowVideo(filePath);
+                frames[frameIndex].ConfigureDisplay(showFileName, fileNameFont, fileNameColor, fileNameDisplayMode);
+                frames[frameIndex].ShowVideo(filePath, FormatDisplayName(filePath));
                 frameTimers[frameIndex].Stop();
                 WriteDebugLog($"Frame {frameIndex} ({reason}): video {Path.GetFileName(filePath)} [history {frameHistories[frameIndex].CurrentIndex + 1}/{frameHistories[frameIndex].Count}]");
             }
             else
             {
                 if (activeVideoFrameIndex == frameIndex)
-                {
-                    frames[frameIndex].StopVideoPlayback();
                     activeVideoFrameIndex = null;
-                }
+
+                if (frames[frameIndex].IsVideoActive)
+                    frames[frameIndex].StopVideoPlayback();
 
                 ShowImageOnFrame(frameIndex, filePath);
                 frameTimers[frameIndex].Start();
                 WriteDebugLog($"Frame {frameIndex} ({reason}): image {Path.GetFileName(filePath)} [history {frameHistories[frameIndex].CurrentIndex + 1}/{frameHistories[frameIndex].Count}]");
             }
+        }
+
+        private void SyncActiveVideoFrameIndex()
+        {
+            int? playingIndex = null;
+            for (int i = 0; i < frames.Length; i++)
+            {
+                if (!frames[i].IsVideoActive) continue;
+
+                if (!playingIndex.HasValue)
+                    playingIndex = i;
+            }
+
+            activeVideoFrameIndex = playingIndex;
+        }
+
+        private void StopVideoOnAllFramesExcept(int? exceptFrameIndex)
+        {
+            for (int i = 0; i < frames.Length; i++)
+            {
+                if (exceptFrameIndex.HasValue && i == exceptFrameIndex.Value)
+                    continue;
+
+                if (frames[i].IsVideoActive)
+                    frames[i].StopVideoPlayback();
+            }
+
+            activeVideoFrameIndex = exceptFrameIndex;
+        }
+
+        private void EnforceSingleVideoPlayback()
+        {
+            if (frames == null) return;
+
+            int? keeper = null;
+            for (int i = 0; i < frames.Length; i++)
+            {
+                if (!frames[i].IsVideoActive) continue;
+
+                if (!keeper.HasValue)
+                    keeper = i;
+                else
+                    frames[i].StopVideoPlayback();
+            }
+
+            activeVideoFrameIndex = keeper;
+            EnforceGlobalSingleVideoPlayback();
         }
 
         private void ResetFrameTimer(int frameIndex)
@@ -370,7 +596,7 @@ namespace ScreenSaver
                     {
                         for (int i = 0; i < frames.Length; i++)
                         {
-                            NavigateFramePrevious(i);
+                            NavigateFramePrevious(i, userInitiated: true);
                             ResetFrameTimer(i);
                         }
                     }
@@ -381,7 +607,7 @@ namespace ScreenSaver
                     {
                         for (int i = 0; i < frames.Length; i++)
                         {
-                            NavigateFrameNext(i);
+                            NavigateFrameNext(i, userInitiated: true);
                             ResetFrameTimer(i);
                         }
                     }
@@ -488,6 +714,17 @@ namespace ScreenSaver
         {
             if (disposing)
             {
+                UnregisterLiveForm(this);
+
+                if (frames != null)
+                {
+                    foreach (MediaFrameSlot slot in frames)
+                    {
+                        if (slot != null && slot.IsVideoActive)
+                            slot.StopVideoPlayback();
+                    }
+                }
+
                 if (frameTimers != null)
                 {
                     foreach (Timer t in frameTimers)

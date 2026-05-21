@@ -42,7 +42,7 @@ namespace ScreenSaver
 
             if (!includeVideos || screenHasActiveVideoFrame)
             {
-                return PickFromList(imageOnlyMedia.Count > 0 ? imageOnlyMedia : allMedia);
+                return PickFromList(imageOnlyMedia);
             }
 
             return PickFromList(allMedia);
