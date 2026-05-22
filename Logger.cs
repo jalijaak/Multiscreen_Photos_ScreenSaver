@@ -1,31 +1,63 @@
 ﻿using System;
-using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
+using ScreenSaver;
 
 public static class Logger
 {
-    private const string LOG_FILE_NAME = "JJ_screensaver_debug.log";
+    private const string LOG_FILE_NAME = "JJ_screensaver.log";
     private static readonly string LOG_FILE_PATH = Path.Combine(Path.GetTempPath(), LOG_FILE_NAME);
 
+    private static bool? debugLoggingEnabled;
+
+    public static string LogFilePath => LOG_FILE_PATH;
+
+    /// <summary>Alias for <see cref="LogFilePath"/>.</summary>
     public static string DebugLogFilePath => LOG_FILE_PATH;
 
+    /// <summary>Re-read the Debug registry flag (call after changing debug mode in settings).</summary>
+    public static void RefreshDebugLoggingEnabled()
+    {
+        debugLoggingEnabled = null;
+    }
+
+    private static bool IsDebugLoggingEnabled
+    {
+        get
+        {
+            if (!debugLoggingEnabled.HasValue)
+            {
+                try
+                {
+                    var registryManager = new RegistryManager();
+                    debugLoggingEnabled = registryManager.getBooleanPropertyVal(RegistryConstants.REG_KEY_DEBUG, false);
+                }
+                catch
+                {
+                    debugLoggingEnabled = false;
+                }
+            }
+
+            return debugLoggingEnabled.Value;
+        }
+    }
+
     /// <summary>
-    /// Writes a debug log message to a file, automatically including the caller's method name and line number.
+    /// Writes a debug log line only when Debug is enabled in screensaver settings.
     /// </summary>
-    /// <param name="message">The log message.</param>
-    /// <param name="methodName">Automatically set to caller's method name.</param>
-    /// <param name="lineNumber">Automatically includes the line number from where the log was called.</param>
     public static void WriteDebugLog(
         string message,
         [CallerMemberName] string methodName = "",
         [CallerLineNumber] int lineNumber = 0)
     {
+        if (!IsDebugLoggingEnabled)
+            return;
+
         WriteLogEntry("DEBUG", message, methodName, lineNumber, null);
     }
 
     /// <summary>
-    /// Writes an error to the same debug log file (always logged, not gated by screensaver debug mode).
+    /// Writes an error to the log file (always logged, regardless of debug mode).
     /// </summary>
     public static void WriteErrorLog(
         string message,

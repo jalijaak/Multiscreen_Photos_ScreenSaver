@@ -459,6 +459,7 @@ namespace ScreenSaver
 
                 SaveControlSettings(this);
                 registryManager.setBooleanPropertyVal(RegistryConstants.REG_KEY_DEBUG, cbx_debug.Checked);
+                Logger.RefreshDebugLoggingEnabled();
 
                 registryManager.setRegistryProperty(RegistryConstants.REG_KEY_FILENAME_FONT, FontToString(labelFileNameSample.Font));
                 registryManager.setRegistryProperty(RegistryConstants.REG_KEY_FILENAME_COLOR, ColorTranslator.ToHtml(labelFileNameSample.ForeColor));
@@ -564,14 +565,15 @@ namespace ScreenSaver
 
         private void cbx_debug_CheckedChanged(object sender, EventArgs e)
         {
+            Logger.RefreshDebugLoggingEnabled();
             UpdateDebugLogLinkVisibility();
         }
 
         private void UpdateDebugLogLinkVisibility()
         {
             linkDebugLog.Visible = true;
-            linkDebugLog.Text = Path.GetFileName(Logger.DebugLogFilePath);
-            string tooltip = Logger.DebugLogFilePath;
+            linkDebugLog.Text = Path.GetFileName(Logger.LogFilePath);
+            string tooltip = Logger.LogFilePath;
             if (cbx_debug.Checked)
                 tooltip += " (errors always logged; verbose DEBUG when Debug is checked)";
             else
@@ -583,7 +585,7 @@ namespace ScreenSaver
         {
             try
             {
-                string logPath = Logger.DebugLogFilePath;
+                string logPath = Logger.LogFilePath;
                 if (File.Exists(logPath))
                 {
                     Process.Start(new ProcessStartInfo(logPath) { UseShellExecute = true });
@@ -591,12 +593,12 @@ namespace ScreenSaver
                 }
 
                 Process.Start(new ProcessStartInfo(Path.GetDirectoryName(logPath)) { UseShellExecute = true });
-                toolStripStatusLabel.Text = "Debug log not created yet. Temp folder opened.";
+                toolStripStatusLabel.Text = "Log file not created yet. Temp folder opened.";
                 toolStripStatusLabel.ForeColor = SystemColors.GrayText;
             }
             catch (Exception ex)
             {
-                toolStripStatusLabel.Text = "Could not open debug log: " + ex.Message;
+                toolStripStatusLabel.Text = "Could not open log file: " + ex.Message;
                 toolStripStatusLabel.ForeColor = Color.Red;
             }
         }

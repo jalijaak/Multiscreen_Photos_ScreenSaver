@@ -40,12 +40,14 @@ namespace ScreenSaver
                         if (debugMode == "on")
                         {
                             registryManager.setBooleanPropertyVal(RegistryConstants.REG_KEY_DEBUG, true);
+                            Logger.RefreshDebugLoggingEnabled();
                             MessageBox.Show("Debug mode enabled", "Debug Mode", MessageBoxButtons.OK, MessageBoxIcon.Information);
                             return;
                         }
                         else if (debugMode == "off")
                         {
                             registryManager.setBooleanPropertyVal(RegistryConstants.REG_KEY_DEBUG, false);
+                            Logger.RefreshDebugLoggingEnabled();
                             MessageBox.Show("Debug mode disabled", "Debug Mode", MessageBoxButtons.OK, MessageBoxIcon.Information);
                             return;
                         }
@@ -53,6 +55,7 @@ namespace ScreenSaver
                 }
 
                 isDebugMode = registryManager.getBooleanPropertyVal(RegistryConstants.REG_KEY_DEBUG, false);
+                Logger.RefreshDebugLoggingEnabled();
                 Logger.WriteDebugLog($"Application started with arguments: {string.Join(", ", args)}");
 
                 // Process screensaver standard arguments:
@@ -167,7 +170,7 @@ namespace ScreenSaver
             }
             catch (Exception ex)
             {
-                Logger.WriteDebugLog($"Fatal exception in Main: {ex}");
+                Logger.WriteErrorLog("Fatal exception in Main", ex);
                 throw;
             }
         }
