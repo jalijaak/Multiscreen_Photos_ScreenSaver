@@ -25,6 +25,7 @@ namespace ScreenSaver
         private float effectDurationVal;
         private int delayBetweenImages;
         private int videoDurationSeconds;
+        private Timer catalogWaitTimer;
         private List<AnimationTypes> effectsList = new List<AnimationTypes>();
         private SortedDictionary<string, bool> imageFolders = new SortedDictionary<string, bool>();
 
@@ -171,12 +172,12 @@ namespace ScreenSaver
             return false;
         }
 
-        private static MediaCatalog GetSharedCatalog(RegistryManager registryManager)
+        private static MediaCatalog GetSharedCatalog(RegistryManager registryManager, bool loadSynchronously = false)
         {
             lock (CatalogLock)
             {
                 if (sharedCatalog == null)
-                    sharedCatalog = new MediaCatalog(registryManager);
+                    sharedCatalog = new MediaCatalog(registryManager, loadSynchronously);
                 return sharedCatalog;
             }
         }
@@ -247,7 +248,8 @@ namespace ScreenSaver
             this.parent = parent;
             this.isPreviewMode = isPreview;
 
-            mediaCatalog = GetSharedCatalog(registryManager);
+            // Catalog loads in the background so preview/screensaver forms can show immediately.
+            mediaCatalog = GetSharedCatalog(registryManager, loadSynchronously: false);
 
             string delayStr = registryManager.getRegistryProperty(RegistryConstants.REG_KEY_DELAY_BETWEEN_IMAGES, "10");
             if (!int.TryParse(delayStr, out delayBetweenImages))
@@ -262,7 +264,8 @@ namespace ScreenSaver
             Left = screen.Bounds.Left;
             ClientSize = new Size(screen.Bounds.Width, screen.Bounds.Height);
             ShowInTaskbar = false;
-            TopMost = true;
+            // Keep Settings visible when launching preview from the settings dialog.
+            TopMost = parent == null && !isPreviewMode;
             BackColor = Color.Black;
 
             LoadFileNameSettings();
@@ -274,6 +277,67 @@ namespace ScreenSaver
             InitializeFrameGrid();
             animationStepInterval = (int)(effectDurationVal * 1000 / animationSteps);
 
+            Load += Form1_CatalogLoad;
+        }
+
+        private void Form1_CatalogLoad(object sender, EventArgs e)
+        {
+            StartInitialFrameDisplay();
+        }
+
+        private void StartInitialFrameDisplay()
+        {
+            if (frames == null || frames.Length == 0)
+                return;
+
+            if (mediaCatalog.HasMedia)
+            {
+                DisplayInitialFrames();
+                return;
+            }
+
+            if (!mediaCatalog.IsLoading)
+            {
+                WriteErrorLog("Media catalog is empty; preview cannot show media.");
+                return;
+            }
+
+            if (catalogWaitTimer != null)
+                return;
+
+            catalogWaitTimer = new Timer { Interval = 50 };
+            catalogWaitTimer.Tick += CatalogWaitTimer_Tick;
+            catalogWaitTimer.Start();
+        }
+
+        private void CatalogWaitTimer_Tick(object sender, EventArgs e)
+        {
+            if (mediaCatalog.HasMedia)
+            {
+                StopCatalogWaitTimer();
+                DisplayInitialFrames();
+                return;
+            }
+
+            if (!mediaCatalog.IsLoading)
+            {
+                StopCatalogWaitTimer();
+                WriteErrorLog("Media catalog is empty after folder scan completed.");
+            }
+        }
+
+        private void StopCatalogWaitTimer()
+        {
+            if (catalogWaitTimer == null)
+                return;
+
+            catalogWaitTimer.Stop();
+            catalogWaitTimer.Dispose();
+            catalogWaitTimer = null;
+        }
+
+        private void DisplayInitialFrames()
+        {
             for (int i = 0; i < frames.Length; i++)
                 NavigateFrameNext(i);
 
@@ -511,6 +575,7 @@ namespace ScreenSaver
             if (!File.Exists(filePath))
             {
                 WriteErrorLog($"DisplayFileOnFrame ({reason}): file missing '{filePath}'. {GetFrameStateSummary(frameIndex)}");
+                RemoveInvalidFileFromCatalogAndHistory(frameIndex, filePath, "file missing on disk");
                 TryRecoverBlackFrame(frameIndex, reason);
                 return;
             }
@@ -563,7 +628,8 @@ namespace ScreenSaver
                 StopVideoOnAllFramesExcept(frameIndex);
                 activeVideoFrameIndex = frameIndex;
                 frames[frameIndex].ConfigureDisplay(showFileName, fileNameFont, fileNameColor, fileNameDisplayMode);
-                if (!frames[frameIndex].ShowVideo(filePath, FormatDisplayName(filePath)))
+                bool afterVideoEnd = string.Equals(reason, "video-ended", StringComparison.Ordinal);
+                if (!frames[frameIndex].ShowVideo(filePath, FormatDisplayName(filePath), afterVideoEnd))
                 {
                     WriteErrorLog($"DisplayFileOnFrame ({reason}): ShowVideo failed. {GetFrameStateSummary(frameIndex)}");
                     activeVideoFrameIndex = null;
@@ -652,9 +718,18 @@ namespace ScreenSaver
         {
             if (!File.Exists(filePath))
             {
-                WriteErrorLog($"ShowImageOnFrame: file missing '{filePath}'. Refreshing catalog. {GetFrameStateSummary(frameIndex)}");
-                ResetSharedCatalog();
-                mediaCatalog = GetSharedCatalog(registryManager);
+                WriteErrorLog($"ShowImageOnFrame: file missing '{filePath}'. {GetFrameStateSummary(frameIndex)}");
+                RemoveInvalidFileFromCatalogAndHistory(frameIndex, filePath, "file missing on disk");
+                return false;
+            }
+
+            if (MediaCatalog.IsHeicOrHeifFile(filePath))
+            {
+                string ext = Path.GetExtension(filePath);
+                RemoveInvalidFileFromCatalogAndHistory(
+                    frameIndex,
+                    filePath,
+                    $"HEIC/HEIF image not supported (extension {ext})");
                 return false;
             }
 
@@ -664,9 +739,23 @@ namespace ScreenSaver
                 filePath, effect, animationStepInterval, effectDurationVal, FormatDisplayName(filePath));
 
             if (!shown)
+            {
                 WriteErrorLog($"ShowImageOnFrame failed for '{filePath}'. {GetFrameStateSummary(frameIndex)}");
+                RemoveInvalidFileFromCatalogAndHistory(
+                    frameIndex,
+                    filePath,
+                    "image decode failed (invalid or unsupported format)");
+            }
 
             return shown;
+        }
+
+        private void RemoveInvalidFileFromCatalogAndHistory(int frameIndex, string filePath, string reason)
+        {
+            mediaCatalog?.RemoveInvalidFile(filePath, reason);
+
+            if (frameHistories != null && frameIndex >= 0 && frameIndex < frameHistories.Length)
+                frameHistories[frameIndex].RemovePath(filePath);
         }
 
         private string FormatDisplayName(string filePath)
@@ -857,6 +946,7 @@ namespace ScreenSaver
             if (disposing)
             {
                 UnregisterLiveForm(this);
+                StopCatalogWaitTimer();
 
                 if (frames != null)
                 {

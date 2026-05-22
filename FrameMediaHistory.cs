@@ -90,6 +90,26 @@ namespace ScreenSaver
                 items[currentIndex] = path;
         }
 
+        /// <summary>
+        /// Removes a path from history (e.g. after a display-time format error).
+        /// </summary>
+        public void RemovePath(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+                return;
+
+            for (int i = items.Count - 1; i >= 0; i--)
+            {
+                if (string.Equals(items[i], path, StringComparison.OrdinalIgnoreCase))
+                    items.RemoveAt(i);
+            }
+
+            if (items.Count == 0)
+                currentIndex = -1;
+            else if (currentIndex >= items.Count)
+                currentIndex = items.Count - 1;
+        }
+
         private bool IsDuplicateOfLast(string path)
         {
             return items.Count > 0

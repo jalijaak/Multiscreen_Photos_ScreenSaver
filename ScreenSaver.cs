@@ -376,16 +376,19 @@ namespace ScreenSaver
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
             Application.ThreadException += (s, e) =>
             {
-                Logger.WriteDebugLog($"Unhandled UI thread exception: {e.Exception}");
+                Logger.WriteErrorLog("Unhandled UI thread exception", e.Exception);
             };
             AppDomain.CurrentDomain.UnhandledException += (s, e) =>
             {
                 var ex = e.ExceptionObject as Exception;
-                Logger.WriteDebugLog($"Unhandled domain exception: {(ex != null ? ex.ToString() : e.ExceptionObject?.ToString())}");
+                if (ex != null)
+                    Logger.WriteErrorLog("Unhandled domain exception", ex);
+                else
+                    Logger.WriteErrorLog($"Unhandled domain exception: {e.ExceptionObject}");
             };
             TaskScheduler.UnobservedTaskException += (s, e) =>
             {
-                Logger.WriteDebugLog($"Unobserved task exception: {e.Exception}");
+                Logger.WriteErrorLog("Unobserved task exception", e.Exception);
                 e.SetObserved();
             };
         }

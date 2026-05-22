@@ -10,6 +10,9 @@ namespace ScreenSaver
     {
         private readonly AnimationControl imageControl;
         private readonly Label fileNameLabel;
+        private readonly Panel videoSeekPanel;
+        private readonly TrackBar videoSeekBar;
+        private readonly Label videoTimeLabel;
         private AxWMPLib.AxWindowsMediaPlayer videoPlayer;
         private bool videoPlayerInitialized;
         private bool showFileName;
@@ -17,7 +20,8 @@ namespace ScreenSaver
         private bool videoMuted = true;
         private int videoClipLengthSeconds = 30;
         private int effectiveMaxPlaySeconds = 30;
-        private DateTime videoPlayStartTime = DateTime.MinValue;
+        private double playbackSegmentStartSeconds;
+        private bool userDraggingSeekBar;
         private Timer videoDurationTimer;
         private string currentVideoPath;
         private string currentVideoDisplayName;
@@ -29,6 +33,16 @@ namespace ScreenSaver
 
         private int lastLoggedPlayState = -1;
         private static readonly Random videoRandom = new Random();
+
+        private const int VideoOpenDelayAfterEndMs = 200;
+        private const int VideoOpenRetryDelayMs = 250;
+
+        private Timer videoOpenDelayTimer;
+        private Timer videoOpenRetryTimer;
+        private string pendingVideoPath;
+        private string pendingVideoDisplayName;
+        private bool reachedPlayingStateThisOpen;
+        private int openFailureRetriesRemaining;
 
         public bool IsVideoActive => isVideoActive;
 
@@ -64,6 +78,40 @@ namespace ScreenSaver
                 Padding = new Padding(4, 2, 4, 2)
             };
             Controls.Add(fileNameLabel);
+
+            // Must be fully opaque; TrackBar/Label throw if BackColor alpha is not 255.
+            Color seekBarBackground = Color.FromArgb(32, 32, 32);
+            videoSeekPanel = new Panel
+            {
+                Dock = DockStyle.Bottom,
+                Height = 34,
+                Visible = false,
+                BackColor = seekBarBackground
+            };
+            videoTimeLabel = new Label
+            {
+                Dock = DockStyle.Right,
+                Width = 96,
+                ForeColor = Color.White,
+                BackColor = seekBarBackground,
+                TextAlign = ContentAlignment.MiddleRight,
+                Text = "0:00 / 0:00",
+                Font = new Font("Segoe UI", 8.25f)
+            };
+            videoSeekBar = new TrackBar
+            {
+                Dock = DockStyle.Fill,
+                Minimum = 0,
+                Maximum = 1,
+                TickStyle = TickStyle.None,
+                BackColor = videoSeekPanel.BackColor
+            };
+            videoSeekBar.Scroll += VideoSeekBar_Scroll;
+            videoSeekBar.MouseDown += (s, e) => userDraggingSeekBar = true;
+            videoSeekBar.MouseUp += (s, e) => userDraggingSeekBar = false;
+            videoSeekPanel.Controls.Add(videoSeekBar);
+            videoSeekPanel.Controls.Add(videoTimeLabel);
+            Controls.Add(videoSeekPanel);
         }
 
         public void ConfigureDisplay(bool showFileName, Font fileNameFont, Color fileNameColor, int fileNameDisplayMode)
@@ -136,7 +184,43 @@ namespace ScreenSaver
             }
         }
 
-        public bool ShowVideo(string filePath, string displayName = null)
+        public bool ShowVideo(string filePath, string displayName = null, bool afterPreviousVideoEnded = false)
+        {
+            if (!File.Exists(filePath))
+            {
+                Logger.WriteErrorLog($"ShowVideo: file not found '{filePath}'. State: {GetDiagnosticState()}");
+                return false;
+            }
+
+            CancelPendingVideoOpen();
+
+            if (afterPreviousVideoEnded)
+            {
+                EnsureVideoPlayer();
+                ClearAnimatedImage();
+                imageControl.Visible = false;
+                currentVideoPath = filePath;
+                currentVideoDisplayName = displayName ?? Path.GetFileName(filePath);
+                isVideoActive = true;
+                videoEndSignaled = false;
+                pendingVideoPath = filePath;
+                pendingVideoDisplayName = currentVideoDisplayName;
+                UpdateVideoFileNameLabel(currentVideoDisplayName);
+                ShowVideoSeekControls();
+                if (fileNameLabel.Visible)
+                    fileNameLabel.BringToFront();
+                EnsureVideoOpenDelayTimer();
+                videoOpenDelayTimer.Stop();
+                videoOpenDelayTimer.Start();
+                Logger.WriteDebugLog(
+                    $"ShowVideo scheduled in {VideoOpenDelayAfterEndMs}ms after previous video ended: {Path.GetFileName(filePath)}");
+                return true;
+            }
+
+            return BeginVideoPlayback(filePath, displayName, allowOpenRetry: false);
+        }
+
+        private bool BeginVideoPlayback(string filePath, string displayName, bool allowOpenRetry)
         {
             if (!File.Exists(filePath))
             {
@@ -159,13 +243,16 @@ namespace ScreenSaver
             isVideoActive = true;
             videoEndSignaled = false;
             lastLoggedPlayState = -1;
+            reachedPlayingStateThisOpen = false;
+            openFailureRetriesRemaining = allowOpenRetry ? 1 : 0;
             effectiveMaxPlaySeconds = videoClipLengthSeconds;
-            videoPlayStartTime = DateTime.MinValue;
+            playbackSegmentStartSeconds = 0;
 
             videoPlayer.URL = filePath;
             ApplyVideoDisplaySettings();
             videoPlayer.Visible = true;
             videoPlayer.BringToFront();
+            ShowVideoSeekControls();
             if (fileNameLabel.Visible)
                 fileNameLabel.BringToFront();
             videoPlayer.Ctlcontrols.play();
@@ -193,7 +280,11 @@ namespace ScreenSaver
             isVideoActive = false;
             currentVideoPath = null;
             currentVideoDisplayName = null;
-            videoPlayStartTime = DateTime.MinValue;
+            playbackSegmentStartSeconds = 0;
+            openFailureRetriesRemaining = 0;
+            reachedPlayingStateThisOpen = false;
+
+            CancelPendingVideoOpen();
 
             if (videoDurationTimer != null)
                 videoDurationTimer.Stop();
@@ -230,6 +321,7 @@ namespace ScreenSaver
             try { videoPlayer.close(); } catch (Exception ex) { Logger.WriteErrorLog("WMP close failed", ex); }
 
             videoPlayer.Visible = false;
+            HideVideoSeekControls();
         }
 
         private void ShowImageSurfaceIfAvailable()
@@ -278,7 +370,7 @@ namespace ScreenSaver
             videoPlayer.Cursor = Cursors.Hand;
             videoPlayerInitialized = true;
 
-            videoDurationTimer = new Timer { Interval = 1000 };
+            videoDurationTimer = new Timer { Interval = 250 };
             videoDurationTimer.Tick += VideoDurationTimer_Tick;
         }
 
@@ -302,11 +394,18 @@ namespace ScreenSaver
 
         private void VideoDurationTimer_Tick(object sender, EventArgs e)
         {
-            if (!isVideoActive || videoPlayStartTime == DateTime.MinValue || videoEndSignaled)
+            if (!isVideoActive || videoEndSignaled)
                 return;
 
-            if ((DateTime.Now - videoPlayStartTime).TotalSeconds >= effectiveMaxPlaySeconds)
+            if (!userDraggingSeekBar)
+                SyncVideoSeekBarFromPlayer();
+
+            double position = GetCurrentPositionSeconds();
+            if (position >= 0
+                && position - playbackSegmentStartSeconds >= effectiveMaxPlaySeconds)
+            {
                 SignalVideoEnded();
+            }
         }
 
         private void VideoPlayer_PlayStateChange(object sender, AxWMPLib._WMPOCXEvents_PlayStateChangeEvent e)
@@ -320,11 +419,15 @@ namespace ScreenSaver
             // State 3 = playing
             if (e.newState == 3)
             {
+                reachedPlayingStateThisOpen = true;
                 ApplyVideoDisplaySettings();
                 ApplyMuteSettings();
                 UpdateEffectiveMaxPlaySeconds();
                 ApplyRandomStartPositionIfNeeded();
-                videoPlayStartTime = DateTime.Now;
+                playbackSegmentStartSeconds = GetCurrentPositionSeconds();
+                if (playbackSegmentStartSeconds < 0)
+                    playbackSegmentStartSeconds = 0;
+                InitializeVideoSeekBar();
             }
             // State 8 = media ended (natural video length)
             else if (e.newState == 8)
@@ -348,10 +451,103 @@ namespace ScreenSaver
                 return;
             }
 
+            if (!reachedPlayingStateThisOpen && openFailureRetriesRemaining > 0)
+            {
+                openFailureRetriesRemaining--;
+                Logger.WriteDebugLog(
+                    $"WMP open failed for '{currentVideoPath}', retrying in {VideoOpenRetryDelayMs}ms. {GetWmpErrorDescription()}");
+                ScheduleVideoOpenRetry();
+                return;
+            }
+
             string wmpError = GetWmpErrorDescription();
             Logger.WriteErrorLog(
                 $"WMP media failed for '{currentVideoPath}'. {wmpError} State: {GetDiagnosticState()}");
             SignalVideoEnded();
+        }
+
+        private void EnsureVideoOpenDelayTimer()
+        {
+            if (videoOpenDelayTimer != null)
+                return;
+
+            videoOpenDelayTimer = new Timer { Interval = VideoOpenDelayAfterEndMs };
+            videoOpenDelayTimer.Tick += VideoOpenDelayTimer_Tick;
+        }
+
+        private void EnsureVideoOpenRetryTimer()
+        {
+            if (videoOpenRetryTimer != null)
+                return;
+
+            videoOpenRetryTimer = new Timer { Interval = VideoOpenRetryDelayMs };
+            videoOpenRetryTimer.Tick += VideoOpenRetryTimer_Tick;
+        }
+
+        private void VideoOpenDelayTimer_Tick(object sender, EventArgs e)
+        {
+            videoOpenDelayTimer?.Stop();
+            string path = pendingVideoPath;
+            string displayName = pendingVideoDisplayName;
+            pendingVideoPath = null;
+            pendingVideoDisplayName = null;
+
+            if (string.IsNullOrEmpty(path))
+                return;
+
+            BeginVideoPlayback(path, displayName, allowOpenRetry: true);
+        }
+
+        private void ScheduleVideoOpenRetry()
+        {
+            EnsureVideoOpenRetryTimer();
+            videoOpenRetryTimer.Stop();
+            videoOpenRetryTimer.Start();
+        }
+
+        private void VideoOpenRetryTimer_Tick(object sender, EventArgs e)
+        {
+            videoOpenRetryTimer?.Stop();
+
+            if (!isVideoActive || videoEndSignaled || string.IsNullOrEmpty(currentVideoPath))
+                return;
+
+            RetryVideoOpen();
+        }
+
+        private void RetryVideoOpen()
+        {
+            string path = currentVideoPath;
+            string displayName = currentVideoDisplayName;
+
+            try { videoPlayer.Ctlcontrols.stop(); } catch { }
+            try { videoPlayer.close(); } catch { }
+
+            lastLoggedPlayState = -1;
+            reachedPlayingStateThisOpen = false;
+            playbackSegmentStartSeconds = 0;
+            videoEndSignaled = false;
+
+            videoPlayer.URL = path;
+            ApplyVideoDisplaySettings();
+            videoPlayer.Visible = true;
+            videoPlayer.BringToFront();
+            videoPlayer.Ctlcontrols.play();
+            ApplyMuteSettings();
+            StartVideoDurationTimer();
+            Logger.WriteDebugLog($"ShowVideo retry: {Path.GetFileName(path)}");
+        }
+
+        private void CancelPendingVideoOpen()
+        {
+            pendingVideoPath = null;
+            pendingVideoDisplayName = null;
+
+            if (videoOpenDelayTimer != null)
+                videoOpenDelayTimer.Stop();
+
+            if (videoOpenRetryTimer != null)
+                videoOpenRetryTimer.Stop();
         }
 
         private string GetWmpErrorDescription()
@@ -433,6 +629,7 @@ namespace ScreenSaver
 
                 double startSeconds = videoRandom.NextDouble() * maxStartSeconds;
                 videoPlayer.Ctlcontrols.currentPosition = startSeconds;
+                playbackSegmentStartSeconds = startSeconds;
                 Logger.WriteDebugLog(
                     $"Random video start at {startSeconds:F1}s (duration {naturalSeconds:F1}s, clip limit {videoClipLengthSeconds}s) for {Path.GetFileName(currentVideoPath)}");
             }
@@ -440,6 +637,119 @@ namespace ScreenSaver
             {
                 Logger.WriteErrorLog($"ApplyRandomStartPosition failed for '{currentVideoPath}'", ex);
             }
+        }
+
+        private void ShowVideoSeekControls()
+        {
+            videoSeekPanel.Visible = true;
+            videoSeekPanel.BringToFront();
+            videoSeekBar.Enabled = false;
+            videoSeekBar.Value = 0;
+            videoTimeLabel.Text = "0:00 / 0:00";
+        }
+
+        private void HideVideoSeekControls()
+        {
+            videoSeekPanel.Visible = false;
+            userDraggingSeekBar = false;
+        }
+
+        private void InitializeVideoSeekBar()
+        {
+            double duration = GetMediaDurationSeconds();
+            if (duration <= 0 || double.IsInfinity(duration) || double.IsNaN(duration))
+            {
+                videoSeekBar.Enabled = false;
+                return;
+            }
+
+            int maxSeconds = Math.Max(1, Math.Min(32767, (int)Math.Ceiling(duration)));
+            videoSeekBar.Maximum = maxSeconds;
+            videoSeekBar.Enabled = true;
+            SyncVideoSeekBarFromPlayer();
+        }
+
+        private void SyncVideoSeekBarFromPlayer()
+        {
+            double duration = GetMediaDurationSeconds();
+            double position = GetCurrentPositionSeconds();
+            if (duration <= 0 || position < 0)
+                return;
+
+            int seekValue = Math.Max(videoSeekBar.Minimum, Math.Min(videoSeekBar.Maximum, (int)Math.Floor(position)));
+            if (videoSeekBar.Value != seekValue)
+                videoSeekBar.Value = seekValue;
+
+            UpdateVideoTimeLabel(position, duration);
+        }
+
+        private void VideoSeekBar_Scroll(object sender, EventArgs e)
+        {
+            if (!isVideoActive || videoPlayer == null)
+                return;
+
+            try
+            {
+                double duration = GetMediaDurationSeconds();
+                if (duration <= 0)
+                    return;
+
+                double newPosition = videoSeekBar.Value;
+                videoPlayer.Ctlcontrols.currentPosition = newPosition;
+                playbackSegmentStartSeconds = newPosition;
+                UpdateVideoTimeLabel(newPosition, duration);
+            }
+            catch (Exception ex)
+            {
+                Logger.WriteErrorLog("Video seek failed", ex);
+            }
+        }
+
+        private double GetMediaDurationSeconds()
+        {
+            try
+            {
+                if (videoPlayer?.currentMedia != null)
+                    return videoPlayer.currentMedia.duration;
+            }
+            catch
+            {
+            }
+
+            return 0;
+        }
+
+        private double GetCurrentPositionSeconds()
+        {
+            try
+            {
+                if (videoPlayer?.Ctlcontrols != null)
+                    return videoPlayer.Ctlcontrols.currentPosition;
+            }
+            catch
+            {
+            }
+
+            return -1;
+        }
+
+        private static void UpdateVideoTimeLabel(Label label, double positionSeconds, double durationSeconds)
+        {
+            label.Text = $"{FormatTime(positionSeconds)} / {FormatTime(durationSeconds)}";
+        }
+
+        private void UpdateVideoTimeLabel(double positionSeconds, double durationSeconds)
+        {
+            UpdateVideoTimeLabel(videoTimeLabel, positionSeconds, durationSeconds);
+        }
+
+        private static string FormatTime(double seconds)
+        {
+            if (double.IsNaN(seconds) || double.IsInfinity(seconds) || seconds < 0)
+                return "0:00";
+
+            int total = (int)Math.Floor(seconds);
+            return $"{total / 60}:{total % 60:D2}";
         }
 
         private void SignalVideoEnded()
@@ -451,13 +761,16 @@ namespace ScreenSaver
             if (videoDurationTimer != null)
                 videoDurationTimer.Stop();
 
+            CancelPendingVideoOpen();
+
             // End playback before notifying so coordinators see IsVideoActive=false.
             ReleaseWmpPlayback();
             isVideoActive = false;
             currentVideoPath = null;
             currentVideoDisplayName = null;
-            videoPlayStartTime = DateTime.MinValue;
+            playbackSegmentStartSeconds = 0;
             HideVideoFileNameLabel();
+            HideVideoSeekControls();
             HideEmptyImageSurface();
 
             Logger.WriteDebugLog($"SignalVideoEnded. State: {GetDiagnosticState()}");
@@ -513,6 +826,16 @@ namespace ScreenSaver
                 {
                     videoDurationTimer.Stop();
                     videoDurationTimer.Dispose();
+                }
+                if (videoOpenDelayTimer != null)
+                {
+                    videoOpenDelayTimer.Stop();
+                    videoOpenDelayTimer.Dispose();
+                }
+                if (videoOpenRetryTimer != null)
+                {
+                    videoOpenRetryTimer.Stop();
+                    videoOpenRetryTimer.Dispose();
                 }
                 if (videoPlayer != null)
                     videoPlayer.Dispose();

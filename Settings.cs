@@ -610,8 +610,6 @@ namespace ScreenSaver
 
         public void btnPreview_Click(object sender, EventArgs e)
         {
-            SaveSettings();
-            Form1.ResetSharedCatalog();
             runScreensaver(cbx_AllScreens.Checked);
         }
 
@@ -619,6 +617,10 @@ namespace ScreenSaver
         {
             CloseAllFrames();
             Form1.ResetSharedCatalog();
+
+            if (previewForms == null)
+                previewForms = new List<Form>();
+
             List<Screen> orderedScreens = new List<Screen>(Screen.AllScreens);
 
             if (allScreens)
@@ -628,8 +630,9 @@ namespace ScreenSaver
                     Screen screen = orderedScreens[i];
                     Form form = new Form1(this, screen);
                     AttachScreensaverFormClosed(form, destroyOnClose);
-                    form.Show();
                     previewForms.Add(form);
+                    form.Show();
+                    form.BringToFront();
                 }
             }
             else
@@ -637,8 +640,9 @@ namespace ScreenSaver
                 Screen selectedScreen = orderedScreens.Count > 0 ? orderedScreens[0] : Screen.PrimaryScreen;
                 Form form = new Form1(this, selectedScreen);
                 AttachScreensaverFormClosed(form, destroyOnClose);
-                form.Show();
                 previewForms.Add(form);
+                form.Show();
+                form.BringToFront();
             }
 
             Form1.EnforceGlobalSingleVideoPlayback();
