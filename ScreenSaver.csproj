@@ -201,6 +201,18 @@
     </COMReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <!-- Release: merge WMP COM interop DLLs into the main executable (restore packages.config in VS first). -->
+  <Target Name="MergeInteropAssembliesIntoExe" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+    <PropertyGroup>
+      <ILRepackExe>$(MSBuildProjectDirectory)\packages\ILRepack.2.0.41\tools\ILRepack.exe</ILRepackExe>
+    </PropertyGroup>
+    <Message Importance="high" Text="Merging AxInterop.WMPLib.dll and Interop.WMPLib.dll into $(TargetFileName)..." Condition="Exists('$(ILRepackExe)') AND Exists('$(TargetDir)AxInterop.WMPLib.dll')" />
+    <Exec Condition="Exists('$(ILRepackExe)') AND Exists('$(TargetDir)AxInterop.WMPLib.dll')"
+          Command="&quot;$(ILRepackExe)&quot; /ndebug /out:&quot;$(TargetPath)&quot; &quot;$(TargetPath)&quot; &quot;$(TargetDir)AxInterop.WMPLib.dll&quot; &quot;$(TargetDir)Interop.WMPLib.dll&quot;" />
+    <Delete Condition="Exists('$(ILRepackExe)') AND Exists('$(TargetDir)AxInterop.WMPLib.dll')" Files="$(TargetDir)AxInterop.WMPLib.dll" />
+    <Delete Condition="Exists('$(ILRepackExe)')" Files="$(TargetDir)Interop.WMPLib.dll" />
+    <Warning Text="ILRepack not found at $(ILRepackExe). Restore NuGet packages (packages.config) to produce a single-file build without interop DLLs." Condition="!Exists('$(ILRepackExe)') AND Exists('$(TargetDir)AxInterop.WMPLib.dll')" />
+  </Target>
   <PropertyGroup>
     <PreBuildEvent />
     <PostBuildEvent />
