@@ -78,8 +78,7 @@ namespace ScreenSaver
                         }
                         else
                         {
-                            Logger.WriteErrorLog($"EnforceGlobalSingleVideoPlayback: stopping extra video on frame {i}");
-                            form.frames[i].StopVideoPlayback();
+                            form.frames[i].StopVideoPlayback(raiseAbortedEvent: false);
                             if (form.activeVideoFrameIndex == i)
                                 form.activeVideoFrameIndex = null;
                         }
@@ -140,7 +139,7 @@ namespace ScreenSaver
             for (int i = 0; i < frames.Length; i++)
             {
                 if (frames[i].IsVideoActive)
-                    frames[i].StopVideoPlayback();
+                    frames[i].StopVideoPlayback(raiseAbortedEvent: false);
             }
 
             activeVideoFrameIndex = null;
@@ -645,7 +644,7 @@ namespace ScreenSaver
                     activeVideoFrameIndex = null;
 
                 if (frames[frameIndex].IsVideoActive)
-                    frames[frameIndex].StopVideoPlayback();
+                    frames[frameIndex].StopVideoPlayback(raiseAbortedEvent: false);
 
                 if (!ShowImageOnFrame(frameIndex, filePath))
                     TryRecoverBlackFrame(frameIndex, reason);
@@ -677,7 +676,7 @@ namespace ScreenSaver
                     continue;
 
                 if (frames[i].IsVideoActive)
-                    frames[i].StopVideoPlayback();
+                    frames[i].StopVideoPlayback(raiseAbortedEvent: false);
             }
 
             activeVideoFrameIndex = exceptFrameIndex;
@@ -695,7 +694,7 @@ namespace ScreenSaver
                 if (!keeper.HasValue)
                     keeper = i;
                 else
-                    frames[i].StopVideoPlayback();
+                    frames[i].StopVideoPlayback(raiseAbortedEvent: false);
             }
 
             activeVideoFrameIndex = keeper;
@@ -953,7 +952,7 @@ namespace ScreenSaver
                     foreach (MediaFrameSlot slot in frames)
                     {
                         if (slot != null && slot.IsVideoActive)
-                            slot.StopVideoPlayback();
+                            slot.StopVideoPlayback(raiseAbortedEvent: false);
                     }
                 }
 

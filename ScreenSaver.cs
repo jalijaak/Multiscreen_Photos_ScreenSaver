@@ -331,8 +331,20 @@ namespace ScreenSaver
             return int.MaxValue;
         }
 
+        private static void PruneDisposedForms()
+        {
+            for (int i = activeForms.Count - 1; i >= 0; i--)
+            {
+                Form form = activeForms[i];
+                if (form == null || form.IsDisposed)
+                    activeForms.RemoveAt(i);
+            }
+        }
+
         private static void MonitorChangeTimer_Tick(object sender, EventArgs e)
         {
+            PruneDisposedForms();
+
             // Get current screen count
             var currentScreens = Screen.AllScreens;
 
@@ -351,10 +363,17 @@ namespace ScreenSaver
             {
                 // Check if any form's actual attached monitor bounds changed.
                 bool screensChanged = false;
-                for (int i = 0; i < activeForms.Count; i++)
+                for (int i = activeForms.Count - 1; i >= 0; i--)
                 {
-                    Screen actual = Screen.FromHandle(activeForms[i].Handle);
-                    if (!activeForms[i].Bounds.Equals(actual.Bounds))
+                    Form form = activeForms[i];
+                    if (form == null || form.IsDisposed)
+                    {
+                        activeForms.RemoveAt(i);
+                        continue;
+                    }
+
+                    Screen actual = Screen.FromHandle(form.Handle);
+                    if (!form.Bounds.Equals(actual.Bounds))
                     {
                         screensChanged = true;
                         break;
